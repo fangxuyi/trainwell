@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "Trainwell",
+    "slug": "trainwell",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "scheme": "trainwell",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.trainwell.app",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Trainwell records your workout sessions to transcribe and summarize them.",
+        "UIBackgroundModes": ["audio"]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0F172A",
+        "foregroundImage": "./assets/android-icon-foreground.png"
+      },
+      "package": "com.trainwell.app",
+      "permissions": ["RECORD_AUDIO", "FOREGROUND_SERVICE"]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Trainwell records your workout sessions to transcribe and summarize them."
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-background-fetch",
+        {
+          "locationWhenInUse": false
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
