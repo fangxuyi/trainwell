@@ -1,0 +1,10 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "@/*": ["./*"],
+      "@trainwell/schemas": ["../../packages/schemas/src/index.ts"]
+    }
+  }
+}
