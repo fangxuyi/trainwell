@@ -1,8 +1,12 @@
 import Groq from "groq-sdk";
-import type { TranscriptSegment } from "../../../packages/schemas/src/index";
+import type { TranscriptSegment } from "@/lib/types";
 import { randomUUID } from "crypto";
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+let groq: Groq;
+function getGroq() {
+  if (!groq) groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+  return groq;
+}
 
 interface WhisperSegment {
   start: number;
@@ -20,7 +24,7 @@ export async function transcribeAudioUrl(
   const buffer = await res.arrayBuffer();
   const file = new File([buffer], "audio.m4a", { type: "audio/mp4" });
 
-  const response = await groq.audio.transcriptions.create({
+  const response = await getGroq().audio.transcriptions.create({
     model: "whisper-large-v3-turbo",
     file,
     response_format: "verbose_json",
