@@ -1,11 +1,10 @@
-import OpenAI from "openai";
+import Groq from "groq-sdk";
 import type { TranscriptSegment } from "../../../packages/schemas/src/index";
 import { randomUUID } from "crypto";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-export interface WhisperSegment {
-  id: number;
+interface WhisperSegment {
   start: number;
   end: number;
   text: string;
@@ -16,14 +15,13 @@ export async function transcribeAudioUrl(
   audioSegmentId: string,
   sequenceOffsetSeconds = 0
 ): Promise<TranscriptSegment[]> {
-  // Download the audio from Vercel Blob
   const res = await fetch(audioUrl);
   if (!res.ok) throw new Error(`Failed to fetch audio: ${res.status}`);
   const buffer = await res.arrayBuffer();
   const file = new File([buffer], "audio.m4a", { type: "audio/mp4" });
 
-  const response = await openai.audio.transcriptions.create({
-    model: "whisper-1",
+  const response = await groq.audio.transcriptions.create({
+    model: "whisper-large-v3-turbo",
     file,
     response_format: "verbose_json",
     timestamp_granularities: ["segment"],
