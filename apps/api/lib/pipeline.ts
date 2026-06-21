@@ -1,61 +1,30 @@
 import sql from "./db";
-import { transcribeAudioUrl } from "./transcribe";
 import { extractWorkoutData } from "./extract";
-import { generateMarkdown } from "./markdown";
-import { randomUUID } from "crypto";
+import { generateSummaryText } from "./markdown";
 
 export async function transcribeAndExtract(sessionId: string): Promise<void> {
-  // 1. Get all uploaded audio segments in order
-  const segments = await sql`
-    SELECT * FROM audio_segments
+  // Transcription happens per-chunk at upload time; just fetch existing segments.
+  const transcriptRows = await sql`
+    SELECT * FROM transcript_segments
     WHERE session_id = ${sessionId}
-      AND remote_status = 'uploaded'
-      AND blob_url IS NOT NULL
-    ORDER BY sequence ASC
+    ORDER BY start_seconds ASC
   `;
 
-  if (segments.length === 0) {
-    throw new Error(`No uploaded audio segments for session ${sessionId}`);
+  if (transcriptRows.length === 0) {
+    throw new Error(`No transcript segments found for session ${sessionId}`);
   }
 
-  // 2. Transcribe each chunk, accumulating offset
-  const allTranscriptSegments = [];
-  let offsetSeconds = 0;
-
-  for (const seg of segments) {
-    const transcriptSegs = await transcribeAudioUrl(
-      seg.blob_url,
-      seg.id,
-      offsetSeconds
-    );
-    allTranscriptSegments.push(...transcriptSegs);
-    offsetSeconds += seg.duration_seconds;
-  }
-
-  // 3. Save transcript segments
-  for (const seg of allTranscriptSegments) {
-    await sql`
-      INSERT INTO transcript_segments (
-        id, session_id, audio_segment_id, start_seconds, end_seconds,
-        speaker, text, confidence, reviewed
-      ) VALUES (
-        ${seg.id}, ${sessionId}, ${seg.audioSegmentId},
-        ${seg.startSeconds}, ${seg.endSeconds},
-        ${seg.speaker}, ${seg.text}, ${seg.confidence ?? null}, false
-      ) ON CONFLICT (id) DO NOTHING
-    `;
-  }
-
-  // 4. Build full transcript text for extraction
-  const fullTranscript = allTranscriptSegments
-    .map((s) => `[${formatTime(s.startSeconds)}] ${s.text}`)
+  // Build transcript text with timestamps for Claude
+  const fullTranscript = transcriptRows
+    .map((s) => `[${formatTime(s.start_seconds as number)}] ${s.text}`)
     .join("\n");
 
-  // 5. Extract workout data with Claude
+  // Extract workout data with Claude
   const extraction = await extractWorkoutData(sessionId, fullTranscript);
 
-  // 6. Generate Markdown
+  // Generate compact summary in workout-summary skill format
   const sessionRows = await sql`SELECT * FROM sessions WHERE id = ${sessionId}`;
+  if (sessionRows.length === 0) throw new Error(`Session ${sessionId} not found`);
   const session = sessionRows[0] as {
     id: string;
     started_at: string;
@@ -67,9 +36,9 @@ export async function transcribeAndExtract(sessionId: string): Promise<void> {
     goals?: string[];
     audio_retention_policy: string;
   };
-  const markdown = generateMarkdown(session, extraction, allTranscriptSegments);
+  const summaryText = generateSummaryText(session, extraction);
 
-  // 7. Update session with results
+  // Persist results
   await sql`
     UPDATE sessions SET
       exercises = ${JSON.stringify(extraction.exercises)}::jsonb,
@@ -81,7 +50,7 @@ export async function transcribeAndExtract(sessionId: string): Promise<void> {
       next_session_plan = ${JSON.stringify(extraction.nextSessionPlan ?? null)},
       overall_difficulty = ${extraction.overallDifficulty?.value ?? null},
       energy_level = ${extraction.energyLevel?.value ?? null},
-      markdown_content = ${markdown},
+      markdown_content = ${summaryText},
       extraction_version = ${extraction.extractionVersion},
       remote_status = 'review_required',
       remote_version = remote_version + 1,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { put } from "@vercel/blob";
 import sql from "@/lib/db";
+import { transcribeAudioUrl } from "@/lib/transcribe";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,6 @@ export async function POST(
 ) {
   const { id: sessionId } = await params;
 
-  // Expects multipart/form-data with: chunkId, sequence, sha256 (optional), audio file
   const formData = await req.formData();
   const chunkId = formData.get("chunkId") as string;
   const sequence = parseInt(formData.get("sequence") as string, 10);
@@ -35,13 +35,16 @@ export async function POST(
     );
   }
 
-  // Idempotent: return existing chunk if already uploaded
+  // Idempotent: return existing chunk if already transcribed
   const existing = await sql`
     SELECT * FROM audio_segments WHERE id = ${chunkId}
   `;
-  if (existing.length > 0 && existing[0].remote_status === "uploaded") {
+  if (existing.length > 0 && existing[0].remote_status === "transcribed") {
     return NextResponse.json(existing[0], { status: 200 });
   }
+
+  const durationSeconds = parseFloat((formData.get("durationSeconds") as string) ?? "0");
+  const sizeBytes = parseInt((formData.get("sizeBytes") as string) ?? "0", 10);
 
   let blobUrl: string | null = null;
 
@@ -54,21 +57,57 @@ export async function POST(
     blobUrl = blob.url;
   }
 
+  // Save audio segment row first
   const rows = await sql`
     INSERT INTO audio_segments (
       id, session_id, sequence, blob_url, duration_seconds,
       size_bytes, sha256, remote_status
     ) VALUES (
       ${chunkId}, ${sessionId}, ${sequence}, ${blobUrl},
-      ${parseFloat((formData.get("durationSeconds") as string) ?? "0")},
-      ${parseInt((formData.get("sizeBytes") as string) ?? "0", 10)},
-      ${sha256}, 'uploaded'
+      ${durationSeconds}, ${sizeBytes}, ${sha256}, 'uploaded'
     )
     ON CONFLICT (id) DO UPDATE
       SET blob_url = EXCLUDED.blob_url, remote_status = 'uploaded',
           updated_at = now()
     RETURNING *
   `;
+  const segment = rows[0];
 
-  return NextResponse.json(rows[0], { status: 201 });
+  // Transcribe immediately — compute offset from previous chunks
+  if (blobUrl) {
+    try {
+      const offsetRow = await sql`
+        SELECT COALESCE(SUM(duration_seconds), 0)::float AS offset_seconds
+        FROM audio_segments
+        WHERE session_id = ${sessionId} AND sequence < ${sequence}
+      `;
+      const offsetSeconds = parseFloat(offsetRow[0].offset_seconds as string ?? "0");
+
+      const transcriptSegs = await transcribeAudioUrl(blobUrl, chunkId, offsetSeconds);
+
+      for (const seg of transcriptSegs) {
+        await sql`
+          INSERT INTO transcript_segments (
+            id, session_id, audio_segment_id, start_seconds, end_seconds,
+            speaker, text, confidence, reviewed
+          ) VALUES (
+            ${seg.id}, ${sessionId}, ${seg.audioSegmentId},
+            ${seg.startSeconds}, ${seg.endSeconds},
+            ${seg.speaker}, ${seg.text}, ${seg.confidence ?? null}, false
+          ) ON CONFLICT (id) DO NOTHING
+        `;
+      }
+
+      await sql`
+        UPDATE audio_segments SET remote_status = 'transcribed', updated_at = now()
+        WHERE id = ${chunkId}
+      `;
+      segment.remote_status = "transcribed";
+    } catch (err) {
+      // Log but don't fail the upload — pipeline can retry transcription
+      console.error(`Transcription failed for chunk ${chunkId}:`, err);
+    }
+  }
+
+  return NextResponse.json(segment, { status: 201 });
 }

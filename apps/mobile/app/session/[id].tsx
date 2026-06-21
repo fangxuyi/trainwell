@@ -7,13 +7,15 @@ import {
   ActivityIndicator,
   Alert,
 } from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
+import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
+import { useCallback, useRef, useState } from "react";
 import type { WorkoutSession } from "@trainwell/schemas";
 import { getSessionById, deleteSession } from "../../src/db/sessions";
 import { getAudioSegmentsBySession } from "../../src/db/audio";
 import { getNotesBySession } from "../../src/db/quickNotes";
 import { formatDuration } from "../../src/utils/time";
+
+const SYNCING_STATUSES = new Set(["syncing", "locally_complete"]);
 
 export default function SessionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -22,21 +24,45 @@ export default function SessionDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [audioCount, setAudioCount] = useState(0);
   const [noteCount, setNoteCount] = useState(0);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    const load = async () => {
-      const [s, segs, notes] = await Promise.all([
-        getSessionById(id),
-        getAudioSegmentsBySession(id),
-        getNotesBySession(id),
-      ]);
-      setSession(s);
-      setAudioCount(segs.length);
-      setNoteCount(notes.length);
-      setLoading(false);
-    };
-    load();
+  const loadAll = useCallback(async () => {
+    const [s, segs, notes] = await Promise.all([
+      getSessionById(id),
+      getAudioSegmentsBySession(id),
+      getNotesBySession(id),
+    ]);
+    setSession(s);
+    setAudioCount(segs.length);
+    setNoteCount(notes.length);
+    setLoading(false);
+    return s;
   }, [id]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadAll().then((s) => {
+        if (s && SYNCING_STATUSES.has(s.localStatus)) {
+          pollRef.current = setInterval(async () => {
+            const refreshed = await getSessionById(id);
+            if (!refreshed) return;
+            setSession(refreshed);
+            if (!SYNCING_STATUSES.has(refreshed.localStatus)) {
+              clearInterval(pollRef.current!);
+              pollRef.current = null;
+            }
+          }, 3000);
+        }
+      });
+
+      return () => {
+        if (pollRef.current) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
+      };
+    }, [id, loadAll])
+  );
 
   const handleDelete = () => {
     Alert.alert(
@@ -71,6 +97,8 @@ export default function SessionDetailScreen() {
       </View>
     );
   }
+
+  const isSyncing = SYNCING_STATUSES.has(session.localStatus);
 
   const statusColor: Record<string, string> = {
     locally_complete: "#F59E0B",
@@ -131,6 +159,18 @@ export default function SessionDetailScreen() {
         )}
       </View>
 
+      {/* Syncing indicator */}
+      {isSyncing && (
+        <View style={styles.syncingCard}>
+          <ActivityIndicator color="#38BDF8" size="small" style={{ marginRight: 10 }} />
+          <Text style={styles.syncingText}>
+            {session.localStatus === "syncing"
+              ? "Uploading and processing your session..."
+              : "Preparing to sync..."}
+          </Text>
+        </View>
+      )}
+
       {/* Stats */}
       <View style={styles.statsRow}>
         <View style={styles.stat}>
@@ -149,21 +189,15 @@ export default function SessionDetailScreen() {
         </View>
       </View>
 
-      {/* Processing status */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Sync Status</Text>
-        <Text style={styles.detail}>
-          Processing: {session.remoteStatus.replace(/_/g, " ")}
-        </Text>
-        <Text style={styles.detail}>
-          Sync: {session.syncStatus.replace(/_/g, " ")}
-        </Text>
-        <Text style={styles.detail}>
-          Mode: {session.processingMode.replace(/_/g, " ")}
-        </Text>
-      </View>
+      {/* Compact workout summary */}
+      {session.markdownContent && (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Summary</Text>
+          <Text style={styles.summaryText}>{session.markdownContent}</Text>
+        </View>
+      )}
 
-      {/* Exercises if available */}
+      {/* Exercises */}
       {session.exercises && session.exercises.length > 0 && (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Exercises</Text>
@@ -216,14 +250,13 @@ export default function SessionDetailScreen() {
         </View>
       )}
 
-      {/* Actions */}
-      {session.remoteStatus === "review_required" && (
-        <TouchableOpacity
-          style={styles.reviewButton}
-          onPress={() => router.push(`/review/${id}`)}
-        >
-          <Text style={styles.reviewButtonText}>Review & Finalize</Text>
-        </TouchableOpacity>
+      {/* Error state */}
+      {session.localStatus === "local_error" && (
+        <View style={styles.errorCard}>
+          <Text style={styles.errorCardText}>
+            Sync failed. The session is saved locally. You can try again later.
+          </Text>
+        </View>
       )}
 
       <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
@@ -243,6 +276,17 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 12,
   },
+  syncingCard: {
+    backgroundColor: "#0F2744",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#1E4080",
+  },
+  syncingText: { color: "#38BDF8", fontSize: 14, flex: 1 },
   cardTitle: {
     color: "#94A3B8",
     fontSize: 11,
@@ -282,18 +326,25 @@ const styles = StyleSheet.create({
   },
   statValue: { color: "#38BDF8", fontSize: 22, fontWeight: "700" },
   statLabel: { color: "#64748B", fontSize: 12, marginTop: 2 },
+  summaryText: {
+    color: "#CBD5E1",
+    fontSize: 14,
+    lineHeight: 22,
+    fontFamily: "monospace",
+  },
   exerciseRow: { marginBottom: 8 },
   exerciseName: { color: "#F1F5F9", fontSize: 15, fontWeight: "500" },
   exerciseDetail: { color: "#64748B", fontSize: 13, marginTop: 2 },
   noteText: { color: "#CBD5E1", fontSize: 14, marginBottom: 4 },
-  reviewButton: {
-    backgroundColor: "#7C3AED",
-    borderRadius: 14,
-    padding: 18,
-    alignItems: "center",
+  errorCard: {
+    backgroundColor: "#2D1515",
+    borderRadius: 12,
+    padding: 14,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#7F1D1D",
   },
-  reviewButtonText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  errorCardText: { color: "#F87171", fontSize: 14 },
   deleteButton: {
     backgroundColor: "transparent",
     borderWidth: 1,

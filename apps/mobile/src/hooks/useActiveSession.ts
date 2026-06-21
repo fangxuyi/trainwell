@@ -11,6 +11,7 @@ import {
 import { addQuickNote, getNotesBySession } from "../db/quickNotes";
 import { now, elapsedSeconds } from "../utils/time";
 import { enqueueJob } from "../db/syncJobs";
+import { runSyncWorker } from "../sync/worker";
 
 export type ActiveSessionState =
   | "idle"
@@ -147,6 +148,8 @@ export function useActiveSession(): ActiveSession {
     if (session.processingMode !== "local_only") {
       await enqueueJob(session.id, "create_remote_session");
       await updateSessionStatus(session.id, { syncStatus: "pending" });
+      // Kick off sync in background — worker updates local DB as it progresses
+      runSyncWorker(session.id).catch(console.error);
     }
 
     const updated = await getSessionById(session.id);
