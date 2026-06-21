@@ -39,6 +39,7 @@ export default function RootLayout() {
         />
         <Stack.Screen name="history/index" options={{ title: "History" }} />
         <Stack.Screen name="review/[id]" options={{ title: "Review Session" }} />
+        <Stack.Screen name="ask" options={{ title: "Ask AI" }} />
       </Stack>
     </>
   );

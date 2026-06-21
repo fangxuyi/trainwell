@@ -11,6 +11,7 @@ import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import type { WorkoutSession } from "@trainwell/schemas";
 import { getSessionById, deleteSession } from "../../src/db/sessions";
+import { runSyncWorker } from "../../src/sync/worker";
 import { getAudioSegmentsBySession } from "../../src/db/audio";
 import { getNotesBySession } from "../../src/db/quickNotes";
 import { formatDuration } from "../../src/utils/time";
@@ -250,12 +251,31 @@ export default function SessionDetailScreen() {
         </View>
       )}
 
-      {/* Error state */}
+      {/* Review & finalize */}
+      {session.remoteStatus === "review_required" && (
+        <TouchableOpacity
+          style={styles.reviewButton}
+          onPress={() => router.push(`/review/${id}`)}
+        >
+          <Text style={styles.reviewButtonText}>Review & Finalize</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Error state with retry */}
       {session.localStatus === "local_error" && (
         <View style={styles.errorCard}>
           <Text style={styles.errorCardText}>
-            Sync failed. The session is saved locally. You can try again later.
+            Sync failed. The session is saved locally.
           </Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => {
+              runSyncWorker(id).catch(console.error);
+              loadAll();
+            }}
+          >
+            <Text style={styles.retryButtonText}>Retry Sync</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -336,6 +356,14 @@ const styles = StyleSheet.create({
   exerciseName: { color: "#F1F5F9", fontSize: 15, fontWeight: "500" },
   exerciseDetail: { color: "#64748B", fontSize: 13, marginTop: 2 },
   noteText: { color: "#CBD5E1", fontSize: 14, marginBottom: 4 },
+  reviewButton: {
+    backgroundColor: "#7C3AED",
+    borderRadius: 14,
+    padding: 18,
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  reviewButtonText: { color: "#fff", fontSize: 16, fontWeight: "700" },
   errorCard: {
     backgroundColor: "#2D1515",
     borderRadius: 12,
@@ -343,8 +371,16 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderWidth: 1,
     borderColor: "#7F1D1D",
+    gap: 10,
   },
   errorCardText: { color: "#F87171", fontSize: 14 },
+  retryButton: {
+    backgroundColor: "#7F1D1D",
+    borderRadius: 8,
+    padding: 10,
+    alignItems: "center",
+  },
+  retryButtonText: { color: "#FCA5A5", fontSize: 14, fontWeight: "600" },
   deleteButton: {
     backgroundColor: "transparent",
     borderWidth: 1,
