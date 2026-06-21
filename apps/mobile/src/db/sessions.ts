@@ -237,6 +237,52 @@ export async function getPendingUploadSessions(): Promise<WorkoutSession[]> {
   return rows.map(rowToSession);
 }
 
+export async function saveSyncResult(
+  sessionId: string,
+  remote: Record<string, unknown>
+): Promise<void> {
+  const db = await getDb();
+  const ts = now();
+
+  const toJson = (v: unknown): string => {
+    if (typeof v === "string") return v;
+    return JSON.stringify(v ?? []);
+  };
+
+  await db.runAsync(
+    `UPDATE sessions SET
+      exercises = ?,
+      session_notes = ?,
+      technique_themes = ?,
+      accomplishments = ?,
+      improvement_areas = ?,
+      pain_observations = ?,
+      next_session_plan = ?,
+      overall_difficulty = ?,
+      energy_level = ?,
+      extraction_version = ?,
+      markdown_content = ?,
+      updated_at = ?,
+      local_version = local_version + 1
+     WHERE id = ?`,
+    [
+      toJson(remote.exercises),
+      toJson(remote.session_notes),
+      toJson(remote.technique_themes),
+      toJson(remote.accomplishments),
+      toJson(remote.improvement_areas),
+      toJson(remote.pain_observations),
+      remote.next_session_plan != null ? toJson(remote.next_session_plan) : null,
+      (remote.overall_difficulty as number | null) ?? null,
+      (remote.energy_level as number | null) ?? null,
+      (remote.extraction_version as string | null) ?? null,
+      (remote.markdown_content as string | null) ?? null,
+      ts,
+      sessionId,
+    ]
+  );
+}
+
 export async function deleteSession(id: string): Promise<void> {
   const db = await getDb();
   await db.runAsync("DELETE FROM sessions WHERE id = ?", [id]);

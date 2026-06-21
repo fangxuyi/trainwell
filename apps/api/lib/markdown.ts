@@ -17,6 +17,67 @@ interface SessionRow {
   audio_retention_policy: string;
 }
 
+function fmtTime(secs: number): string {
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+export function generateSummaryText(
+  session: SessionRow,
+  extraction: ExtractionOutput
+): string {
+  const date = new Date(session.started_at).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
+  const lines: string[] = [`Workout Summary for ${date}`, ""];
+
+  const completed = extraction.exercises.filter((e) => e.completed);
+
+  if (completed.length === 0) {
+    lines.push("No exercises recorded.");
+    return lines.join("\n");
+  }
+
+  completed.forEach((ex, idx) => {
+    const timeRange =
+      ex.startedAtSeconds != null && ex.endedAtSeconds != null
+        ? `, ${fmtTime(ex.startedAtSeconds)}-${fmtTime(ex.endedAtSeconds)}`
+        : "";
+
+    const completedSets = ex.sets.filter((s) => s.completed);
+    const totalSets = completedSets.length;
+    const firstSet = completedSets[0];
+    let volume = "";
+    if (totalSets > 0) {
+      volume += `, ${totalSets} set${totalSets !== 1 ? "s" : ""}`;
+      const reps = firstSet?.completedReps;
+      if (reps != null) volume += ` × ${reps} reps`;
+      const w = firstSet?.weight;
+      if (w) volume += ` @ ${w.value}${w.unit}`;
+    }
+
+    lines.push(`${idx + 1}. ${ex.canonicalName}${timeRange}${volume}`);
+
+    const cue =
+      ex.techniqueNotes[0]?.text ??
+      ex.trainerNotes[0]?.text ??
+      ex.userNotes[0]?.text;
+    if (cue) lines.push(`- ${cue}`);
+
+    lines.push("");
+  });
+
+  if (extraction.sessionNotes.length > 0) {
+    lines.push(`Note: ${extraction.sessionNotes[0]}`);
+  }
+
+  return lines.join("\n").trim();
+}
+
 export function generateMarkdown(
   session: SessionRow,
   extraction: ExtractionOutput,

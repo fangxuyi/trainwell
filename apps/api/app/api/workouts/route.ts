@@ -21,6 +21,8 @@ export async function POST(req: NextRequest) {
     audioRetentionPolicy = "delete_after_review",
     timezone = "UTC",
     startedAt,
+    endedAt,
+    durationSeconds,
   } = body;
 
   if (!id || !startedAt) {
@@ -40,12 +42,12 @@ export async function POST(req: NextRequest) {
 
   const rows = await sql`
     INSERT INTO sessions (
-      id, started_at, timezone, workout_type, trainer_name,
-      goals, processing_mode, audio_retention_policy,
-      local_status, remote_status, sync_status
+      id, started_at, ended_at, duration_seconds, timezone,
+      workout_type, trainer_name, goals, processing_mode,
+      audio_retention_policy, local_status, remote_status, sync_status
     ) VALUES (
-      ${id}, ${startedAt}, ${timezone},
-      ${workoutType ?? null}, ${trainerName ?? null},
+      ${id}, ${startedAt}, ${endedAt ?? null}, ${durationSeconds ?? null},
+      ${timezone}, ${workoutType ?? null}, ${trainerName ?? null},
       ${JSON.stringify(goals)}, ${processingMode},
       ${audioRetentionPolicy}, 'locally_complete', 'uploaded', 'pending'
     ) RETURNING *

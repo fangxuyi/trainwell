@@ -1,0 +1,132 @@
+import type { SyncJob } from "@trainwell/schemas";
+import {
+  getPendingJobsBySession,
+  markJobRunning,
+  markJobCompleted,
+  markJobFailed,
+} from "../db/syncJobs";
+import {
+  getAudioSegmentById,
+  markSegmentUploaded,
+} from "../db/audio";
+import { apiPost, apiGet, uploadAudioChunk } from "../utils/api";
+import {
+  getSessionById,
+  updateSessionStatus,
+  saveSyncResult,
+} from "../db/sessions";
+
+const POLL_INTERVAL_MS = 5000;
+const MAX_POLL_ATTEMPTS = 60; // 5 minutes
+
+export async function runSyncWorker(sessionId: string): Promise<void> {
+  await updateSessionStatus(sessionId, { localStatus: "syncing", syncStatus: "pending" });
+
+  try {
+    const jobs = await getPendingJobsBySession(sessionId);
+
+    // Step 1: create session remotely (must run before uploads)
+    const createJob = jobs.find((j) => j.type === "create_remote_session");
+    if (createJob) {
+      await runJob(createJob, () => handleCreateRemoteSession(createJob));
+    }
+
+    // Step 2: upload all audio chunks (sequentially, in order)
+    const uploadJobs = jobs
+      .filter((j) => j.type === "upload_audio_chunk")
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+    for (const job of uploadJobs) {
+      await runJob(job, () => handleUploadAudioChunk(job));
+    }
+
+    // Step 3: trigger extraction
+    await apiPost<unknown>(`/api/workouts/${sessionId}/process`, {});
+
+    // Step 4: poll for completion
+    let remoteStatus = "processing";
+    let attempts = 0;
+    while (attempts < MAX_POLL_ATTEMPTS) {
+      await sleep(POLL_INTERVAL_MS);
+      const status = await apiGet<{ remoteStatus: string }>(
+        `/api/workouts/${sessionId}/processing-status`
+      );
+      remoteStatus = status.remoteStatus;
+      if (remoteStatus === "review_required" || remoteStatus === "finalized") break;
+      if (remoteStatus === "failed") throw new Error("Processing failed on server");
+      attempts++;
+    }
+
+    if (remoteStatus !== "review_required" && remoteStatus !== "finalized") {
+      throw new Error(`Processing timed out (status: ${remoteStatus})`);
+    }
+
+    // Step 5: fetch result and save locally
+    const remote = await apiGet<Record<string, unknown>>(
+      `/api/workouts/${sessionId}`
+    );
+    await saveSyncResult(sessionId, remote);
+
+    await updateSessionStatus(sessionId, {
+      localStatus: "cached",
+      syncStatus: "synchronized",
+    });
+  } catch (err) {
+    console.error("[SyncWorker] failed for session", sessionId, err);
+    await updateSessionStatus(sessionId, {
+      localStatus: "local_error",
+      syncStatus: "failed",
+    });
+  }
+}
+
+async function runJob(job: SyncJob, handler: () => Promise<void>): Promise<void> {
+  await markJobRunning(job.id);
+  try {
+    await handler();
+    await markJobCompleted(job.id);
+  } catch (err) {
+    await markJobFailed(job.id, (err as Error).message, job.attemptCount + 1);
+    throw err;
+  }
+}
+
+async function handleCreateRemoteSession(job: SyncJob): Promise<void> {
+  const session = await getSessionById(job.sessionId);
+  if (!session) throw new Error(`Session ${job.sessionId} not found`);
+
+  await apiPost<unknown>("/api/workouts", {
+    id: session.id,
+    workoutType: session.workoutType,
+    trainerName: session.trainerName,
+    goals: session.goals,
+    processingMode: session.processingMode,
+    audioRetentionPolicy: session.audioRetentionPolicy,
+    timezone: session.timezone,
+    startedAt: session.startedAt,
+    endedAt: session.endedAt,
+    durationSeconds: session.durationSeconds,
+  });
+}
+
+async function handleUploadAudioChunk(job: SyncJob): Promise<void> {
+  if (!job.payloadReference) throw new Error("Missing audio segment ID");
+
+  const segment = await getAudioSegmentById(job.payloadReference);
+  if (!segment) throw new Error(`Audio segment not found: ${job.payloadReference}`);
+
+  const blobUrl = await uploadAudioChunk(
+    job.sessionId,
+    segment.id,
+    segment.sequence,
+    segment.localPath,
+    segment.durationSeconds,
+    segment.sizeBytes
+  );
+
+  await markSegmentUploaded(segment.id, blobUrl ?? "");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

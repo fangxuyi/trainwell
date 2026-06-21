@@ -20,6 +20,8 @@ Rules:
 - Never invent data that isn't in the transcript
 - Body weight exercises have no weight value
 - Record pain/discomfort observations without diagnosis
+- Each transcript line starts with [mm:ss] — use these to estimate startedAtSeconds and endedAtSeconds for each exercise (convert mm:ss to total seconds). These are approximate — your best estimate is better than null.
+- The transcript may include Chinese or English speech mixed together.
 
 Return ONLY valid JSON matching the ExtractionOutput schema.`;
 
@@ -35,6 +37,8 @@ const OUTPUT_SCHEMA = `{
       "bodyRegions": ["string"],
       "equipment": ["string"],
       "sequenceNumber": 0,
+      "startedAtSeconds": 0,
+      "endedAtSeconds": 60,
       "planned": false,
       "completed": true,
       "sets": [

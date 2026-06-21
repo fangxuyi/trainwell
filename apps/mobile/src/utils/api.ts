@@ -29,7 +29,7 @@ export async function uploadAudioChunk(
   localPath: string,
   durationSeconds: number,
   sizeBytes: number
-): Promise<void> {
+): Promise<string | null> {
   const fileRes = await fetch(localPath);
   const blob = await fileRes.blob();
 
@@ -47,4 +47,6 @@ export async function uploadAudioChunk(
   if (!res.ok) {
     throw new Error(`Upload chunk failed (${res.status})`);
   }
+  const data = (await res.json()) as { blob_url?: string };
+  return data.blob_url ?? null;
 }
