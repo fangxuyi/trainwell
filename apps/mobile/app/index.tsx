@@ -7,9 +7,11 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useFocusEffect } from "expo-router";
 import type { WorkoutSession } from "@trainwell/schemas";
-import { listSessions, getIncompleteSession } from "../src/db/sessions";
+import { listSessions, getIncompleteSession, updateSessionStatus } from "../src/db/sessions";
+import { recorder } from "../src/recording/recorder";
 import { formatDuration } from "../src/utils/time";
 
 export default function HomeScreen() {
@@ -19,18 +21,30 @@ export default function HomeScreen() {
     useState<WorkoutSession | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const load = async () => {
-      const [all, incomplete] = await Promise.all([
-        listSessions(20),
-        getIncompleteSession(),
-      ]);
-      setSessions(all.filter((s) => s.localStatus !== "recording" && s.localStatus !== "paused"));
-      setIncompleteSession(incomplete);
-      setLoading(false);
-    };
-    load();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      const load = async () => {
+        setLoading(true);
+        // If recorder is not actively running, any session stuck in
+        // recording/paused was interrupted — mark it complete so it
+        // shows up in history instead of the resume banner.
+        if (!recorder.isActive()) {
+          const stale = await getIncompleteSession();
+          if (stale) {
+            await updateSessionStatus(stale.id, { localStatus: "locally_complete" });
+          }
+        }
+        const [all, incomplete] = await Promise.all([
+          listSessions(20),
+          recorder.isActive() ? getIncompleteSession() : Promise.resolve(null),
+        ]);
+        setSessions(all.filter((s) => s.localStatus !== "recording" && s.localStatus !== "paused"));
+        setIncompleteSession(incomplete);
+        setLoading(false);
+      };
+      load();
+    }, [])
+  );
 
   const renderSession = ({ item }: { item: WorkoutSession }) => (
     <TouchableOpacity

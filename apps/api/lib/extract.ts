@@ -1,7 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { ExtractionOutput } from "../../../packages/schemas/src/index";
+import type { ExtractionOutput } from "@/lib/types";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+let anthropic: Anthropic;
+function getAnthropic() {
+  if (!anthropic) anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  return anthropic;
+}
 
 const EXTRACTION_VERSION = "1.0";
 
@@ -82,7 +86,7 @@ export async function extractWorkoutData(
   sessionId: string,
   transcript: string
 ): Promise<ExtractionOutput> {
-  const message = await anthropic.messages.create({
+  const message = await getAnthropic().messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 4096,
     system: SYSTEM_PROMPT,
@@ -120,7 +124,7 @@ export async function answerWorkoutQuestion(
   question: string,
   context: string
 ): Promise<{ answer: string; citations: Array<{ sessionId: string; date: string; excerpt: string }> }> {
-  const message = await anthropic.messages.create({
+  const message = await getAnthropic().messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 1024,
     system: `You are a personal training assistant. Answer questions about the user's workout history concisely and accurately. Only state facts that are present in the provided context. Cite the specific session when referencing workout data.`,

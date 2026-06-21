@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { transcribeAndExtract } from "@/lib/pipeline";
 
+export const dynamic = "force-dynamic";
+
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }

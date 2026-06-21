@@ -12,7 +12,9 @@
       "bundleIdentifier": "com.trainwell.app",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Trainwell records your workout sessions to transcribe and summarize them.",
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": [
+          "audio"
+        ]
       }
     },
     "android": {
@@ -21,7 +23,10 @@
         "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "package": "com.trainwell.app",
-      "permissions": ["RECORD_AUDIO", "FOREGROUND_SERVICE"]
+      "permissions": [
+        "RECORD_AUDIO",
+        "FOREGROUND_SERVICE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -30,19 +35,14 @@
     "plugins": [
       "expo-router",
       "expo-sqlite",
-      [
-        "expo-av",
-        {
-          "microphonePermission": "Trainwell records your workout sessions to transcribe and summarize them."
-        }
-      ],
       "expo-secure-store",
       [
         "expo-background-fetch",
         {
           "locationWhenInUse": false
         }
-      ]
+      ],
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": true

@@ -1,13 +1,14 @@
 {
   "name": "mobile",
   "version": "1.0.0",
-  "main": "index.ts",
+  "main": "expo-router/entry",
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~56.0.12",
-    "expo-av": "^16.0.8",
+    "expo-audio": "~56.0.12",
     "expo-background-fetch": "~56.0.19",
     "expo-crypto": "~56.0.4",
+    "expo-dev-client": "~56.0.20",
     "expo-file-system": "~56.0.8",
     "expo-network": "~56.0.5",
     "expo-router": "~56.2.11",
@@ -24,8 +25,8 @@
   },
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web"
   },
   "private": true

@@ -3,7 +3,7 @@ import type {
   ExerciseRecord,
   ExerciseSet,
   TranscriptSegment,
-} from "../../../packages/schemas/src/index";
+} from "@/lib/types";
 
 interface SessionRow {
   id: string;

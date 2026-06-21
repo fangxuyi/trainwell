@@ -3,8 +3,18 @@
   "compilerOptions": {
     "strict": true,
     "paths": {
-      "@/*": ["./*"],
-      "@trainwell/schemas": ["../../packages/schemas/src/index.ts"]
+      "@/*": [
+        "./*"
+      ],
+      "@trainwell/schemas": [
+        "../../packages/schemas/src/index.ts"
+      ]
     }
-  }
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts"
+  ]
 }

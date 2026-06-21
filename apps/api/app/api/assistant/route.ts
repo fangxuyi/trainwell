@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { answerWorkoutQuestion } from "@/lib/extract";
 
+export const dynamic = "force-dynamic";
+
 export async function POST(req: NextRequest) {
   const { question } = await req.json();
   if (!question?.trim()) {
