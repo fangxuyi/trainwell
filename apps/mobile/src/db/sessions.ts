@@ -302,6 +302,55 @@ export async function saveSyncResult(
   );
 }
 
+export async function upsertSessionsFromServer(
+  rows: Record<string, unknown>[]
+): Promise<void> {
+  const db = await getDb();
+  const ts = now();
+  for (const r of rows) {
+    // INSERT OR IGNORE — local in-progress sessions are the source of truth
+    await db.runAsync(
+      `INSERT OR IGNORE INTO sessions
+        (id, started_at, ended_at, duration_seconds, timezone,
+         workout_type, trainer_name, goals, processing_mode,
+         audio_retention_policy, local_status, remote_status, sync_status,
+         exercises, session_notes, technique_themes, accomplishments,
+         improvement_areas, pain_observations, next_session_plan,
+         overall_difficulty, energy_level, markdown_content,
+         extraction_version, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        r.id,
+        r.started_at,
+        r.ended_at ?? null,
+        r.duration_seconds ?? null,
+        r.timezone ?? "UTC",
+        r.workout_type ?? null,
+        r.trainer_name ?? null,
+        typeof r.goals === "string" ? r.goals : JSON.stringify(r.goals ?? []),
+        r.processing_mode ?? "automatic_hybrid",
+        r.audio_retention_policy ?? "delete_after_review",
+        r.local_status ?? "cached",
+        r.remote_status ?? "finalized",
+        r.sync_status ?? "synced",
+        typeof r.exercises === "string" ? r.exercises : JSON.stringify(r.exercises ?? []),
+        typeof r.session_notes === "string" ? r.session_notes : JSON.stringify(r.session_notes ?? []),
+        typeof r.technique_themes === "string" ? r.technique_themes : JSON.stringify(r.technique_themes ?? []),
+        typeof r.accomplishments === "string" ? r.accomplishments : JSON.stringify(r.accomplishments ?? []),
+        typeof r.improvement_areas === "string" ? r.improvement_areas : JSON.stringify(r.improvement_areas ?? []),
+        typeof r.pain_observations === "string" ? r.pain_observations : JSON.stringify(r.pain_observations ?? []),
+        r.next_session_plan ? (typeof r.next_session_plan === "string" ? r.next_session_plan : JSON.stringify(r.next_session_plan)) : null,
+        r.overall_difficulty ?? null,
+        r.energy_level ?? null,
+        r.markdown_content ?? null,
+        r.extraction_version ?? null,
+        r.created_at ?? ts,
+        r.updated_at ?? ts,
+      ]
+    );
+  }
+}
+
 export async function deleteSession(id: string): Promise<void> {
   const db = await getDb();
   await db.runAsync("DELETE FROM sessions WHERE id = ?", [id]);
