@@ -11,9 +11,64 @@ import {
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useState, useEffect } from "react";
+import { recorder } from "../../src/recording/recorder";
 import type { ProcessingMode, AudioRetentionPolicy } from "@trainwell/schemas";
 import { useActiveSession } from "../../src/hooks/useActiveSession";
 import { formatDuration } from "../../src/utils/time";
+
+const BAR_COUNT = 48;
+const BAR_WIDTH = 3;
+const BAR_GAP = 2;
+const MAX_BAR_HEIGHT = 44;
+
+function Waveform({ isRecording }: { isRecording: boolean }) {
+  const [bars, setBars] = useState<number[]>(Array(BAR_COUNT).fill(0));
+
+  useEffect(() => {
+    if (!isRecording) return;
+    const id = setInterval(() => {
+      const db = recorder.getCurrentDb();
+      // Map dBFS (-60..0) to 0..1, with a floor so silence shows a thin line
+      const amplitude = Math.max(0.03, Math.min(1, (db + 60) / 60));
+      setBars((prev) => [...prev.slice(1), amplitude]);
+    }, 80);
+    return () => clearInterval(id);
+  }, [isRecording]);
+
+  return (
+    <View style={waveformStyles.container}>
+      {bars.map((amp, i) => {
+        const height = Math.max(2, amp * MAX_BAR_HEIGHT);
+        const opacity = 0.3 + (i / BAR_COUNT) * 0.7;
+        return (
+          <View
+            key={i}
+            style={[
+              waveformStyles.bar,
+              { height, opacity },
+            ]}
+          />
+        );
+      })}
+    </View>
+  );
+}
+
+const waveformStyles = StyleSheet.create({
+  container: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    height: MAX_BAR_HEIGHT + 8,
+    gap: BAR_GAP,
+    marginVertical: 8,
+  },
+  bar: {
+    width: BAR_WIDTH,
+    backgroundColor: "#38BDF8",
+    borderRadius: 2,
+  },
+});
 
 export default function ActiveSessionScreen() {
   const router = useRouter();
@@ -146,6 +201,9 @@ export default function ActiveSessionScreen() {
           <Text style={styles.trainerName}>with {session.trainerName}</Text>
         )}
       </View>
+
+      {/* Waveform */}
+      <Waveform isRecording={isRecording} />
 
       {/* Notes list */}
       {notes.length > 0 && (

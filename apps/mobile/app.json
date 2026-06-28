@@ -42,7 +42,15 @@
           "locationWhenInUse": false
         }
       ],
-      "expo-audio"
+      "expo-audio",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#0F172A",
+          "iosDisplayInForeground": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
