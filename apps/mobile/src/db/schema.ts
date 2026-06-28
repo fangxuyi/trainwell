@@ -24,6 +24,7 @@ export async function initDatabase(db: SQLite.SQLiteDatabase): Promise<void> {
       local_version INTEGER NOT NULL DEFAULT 1,
       remote_version INTEGER,
       last_synced_version INTEGER,
+      exercises TEXT NOT NULL DEFAULT '[]',
       session_notes TEXT NOT NULL DEFAULT '[]',
       technique_themes TEXT NOT NULL DEFAULT '[]',
       accomplishments TEXT NOT NULL DEFAULT '[]',
@@ -101,4 +102,16 @@ export async function initDatabase(db: SQLite.SQLiteDatabase): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_sync_jobs_status ON sync_jobs(status, next_attempt_at);
     CREATE INDEX IF NOT EXISTS idx_quick_notes_session ON quick_notes(session_id);
   `);
+
+  // Migrations for existing databases
+  const migrations = [
+    `ALTER TABLE sessions ADD COLUMN exercises TEXT NOT NULL DEFAULT '[]'`,
+  ];
+  for (const sql of migrations) {
+    try {
+      await db.runAsync(sql);
+    } catch {
+      // column already exists — safe to ignore
+    }
+  }
 }

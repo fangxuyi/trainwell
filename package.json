@@ -10,5 +10,8 @@
     "mobile": "npm run start --workspace=apps/mobile",
     "api": "npm run dev --workspace=apps/api",
     "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "dependencies": {
+    "expo-notifications": "~56.0.18"
   }
 }

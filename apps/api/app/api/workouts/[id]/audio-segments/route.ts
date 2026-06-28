@@ -50,9 +50,9 @@ export async function POST(
 
   if (audioFile) {
     const blob = await put(
-      `sessions/${sessionId}/audio/chunk_${String(sequence).padStart(4, "0")}.m4a`,
+      `sessions/${sessionId}/audio/chunk_${String(sequence).padStart(4, "0")}.wav`,
       audioFile,
-      { access: "public", contentType: "audio/mp4", addRandomSuffix: false }
+      { access: "private", contentType: "audio/wav", addRandomSuffix: false }
     );
     blobUrl = blob.url;
   }

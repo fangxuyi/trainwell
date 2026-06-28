@@ -6,8 +6,15 @@ import {
 } from "expo-audio";
 import { File, Directory, Paths } from "expo-file-system";
 import { createAudioSegment, finalizeAudioSegment, getNextSequenceNumber } from "../db/audio";
+import {
+  setupNotificationChannel,
+  requestNotificationPermission,
+  showRecordingNotification,
+  updateRecordingNotification,
+  dismissRecordingNotification,
+} from "./lockScreen";
 
-const CHUNK_DURATION_MS = 60_000; // 60-second chunks
+const CHUNK_DURATION_MS = 60_000;
 
 class WorkoutRecorder {
   private recorder: InstanceType<typeof AudioModule.AudioRecorder> | null = null;
@@ -22,7 +29,18 @@ class WorkoutRecorder {
 
   async requestPermissions(): Promise<boolean> {
     const { granted } = await requestRecordingPermissionsAsync();
+    await setupNotificationChannel();
+    await requestNotificationPermission();
     return granted;
+  }
+
+  getCurrentDb(): number {
+    if (!this.recorder || this.isPaused) return -160;
+    try {
+      return (this.recorder.getStatus() as any).metering ?? -160;
+    } catch {
+      return -160;
+    }
   }
 
   async start(
@@ -36,6 +54,7 @@ class WorkoutRecorder {
     this.onChunkSaved = callbacks.onChunkSaved;
     this.onError = callbacks.onError;
     this.elapsedAtPause = 0;
+    this.startTime = 0;
     this.chunkCount = 0;
     this.isPaused = false;
 
@@ -43,10 +62,12 @@ class WorkoutRecorder {
       allowsRecording: true,
       playsInSilentMode: true,
       shouldPlayInBackground: true,
+      allowsBackgroundRecording: true,
     });
 
     await this.startChunk();
     this.scheduleNextChunk();
+    await showRecordingNotification(0);
   }
 
   async pause(): Promise<void> {
@@ -75,6 +96,7 @@ class WorkoutRecorder {
     }
     this.sessionId = null;
     this.isPaused = false;
+    await dismissRecordingNotification();
   }
 
   getElapsedSeconds(): number {
@@ -93,7 +115,25 @@ class WorkoutRecorder {
   private async startChunk(): Promise<void> {
     if (!this.sessionId) return;
 
-    const recorder = new AudioModule.AudioRecorder(RecordingPresets.HIGH_QUALITY);
+    if (this.startTime > 0) {
+      this.elapsedAtPause += (Date.now() - this.startTime) / 1000;
+    }
+
+    const recorder = new AudioModule.AudioRecorder({
+      ios: {
+        extension: ".wav",
+        outputFormat: "lpcm",
+        audioQuality: 127,
+        sampleRate: 44100,
+        numberOfChannels: 1,
+        bitRate: 705600,
+        linearPCMBitDepth: 16,
+        linearPCMIsBigEndian: false,
+        linearPCMIsFloat: false,
+      },
+      android: (RecordingPresets.HIGH_QUALITY as any).android,
+      isMeteringEnabled: true,
+    });
     await recorder.prepareToRecordAsync();
     recorder.record();
     this.recorder = recorder;
@@ -119,7 +159,6 @@ class WorkoutRecorder {
     const sessionId = this.sessionId;
     const recorder = this.recorder;
     this.recorder = null;
-
     await recorder.stop();
 
     const uri = recorder.uri;
@@ -127,17 +166,13 @@ class WorkoutRecorder {
 
     const sequence = await getNextSequenceNumber(sessionId);
 
-    const destDir = new Directory(
-      Paths.document,
-      "sessions",
-      sessionId,
-      "audio"
-    );
-    destDir.create({ intermediates: true });
+    const destDir = new Directory(Paths.document, "sessions", sessionId, "audio");
+    if (!destDir.exists) destDir.create({ intermediates: true });
 
-    const chunkName = `chunk_${String(sequence).padStart(4, "0")}.m4a`;
+    const chunkName = `chunk_${String(sequence).padStart(4, "0")}.wav`;
     const srcFile = new File(uri);
     const destFile = new File(destDir, chunkName);
+    if (destFile.exists) destFile.delete();
     srcFile.move(destFile);
 
     const sizeBytes = destFile.size ?? 0;
@@ -154,6 +189,7 @@ class WorkoutRecorder {
     });
 
     this.onChunkSaved?.(segment.id);
+    updateRecordingNotification(this.getElapsedSeconds()).catch(() => {});
   }
 }
 

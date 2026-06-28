@@ -30,23 +30,30 @@ export async function uploadAudioChunk(
   durationSeconds: number,
   sizeBytes: number
 ): Promise<string | null> {
-  const fileRes = await fetch(localPath);
-  const blob = await fileRes.blob();
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append("chunkId", chunkId);
+    form.append("sequence", String(sequence));
+    form.append("durationSeconds", String(durationSeconds));
+    form.append("sizeBytes", String(sizeBytes));
+    // XHR's native FormData in React Native handles { uri, name, type } file objects
+    form.append("audio", { uri: localPath, name: "audio.wav", type: "audio/wav" } as any);
 
-  const form = new FormData();
-  form.append("chunkId", chunkId);
-  form.append("sequence", String(sequence));
-  form.append("durationSeconds", String(durationSeconds));
-  form.append("sizeBytes", String(sizeBytes));
-  form.append("audio", blob, "audio.m4a");
-
-  const res = await fetch(
-    `${BASE_URL}/api/workouts/${sessionId}/audio-segments`,
-    { method: "POST", body: form }
-  );
-  if (!res.ok) {
-    throw new Error(`Upload chunk failed (${res.status})`);
-  }
-  const data = (await res.json()) as { blob_url?: string };
-  return data.blob_url ?? null;
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${BASE_URL}/api/workouts/${sessionId}/audio-segments`);
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const data = JSON.parse(xhr.responseText) as { blob_url?: string };
+          resolve(data.blob_url ?? null);
+        } catch {
+          resolve(null);
+        }
+      } else {
+        reject(new Error(`Upload chunk failed (${xhr.status}): ${xhr.responseText}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error during chunk upload"));
+    xhr.send(form);
+  });
 }

@@ -23,7 +23,7 @@ export async function GET(
     sessionId,
     remoteStatus: session.remote_status,
     transcriptSegmentCount: parseInt(transcriptRows[0].count, 10),
-    extractionComplete: session.exercises && JSON.parse(session.exercises as string).length > 0,
+    extractionComplete: (() => { try { const ex = session.exercises; if (!ex) return false; const p = typeof ex === "string" ? JSON.parse(ex) : ex; return Array.isArray(p) && p.length > 0; } catch { return false; } })(),
     summaryComplete: !!session.markdown_content,
     errorMessage: session.remote_status === "failed" ? "Processing failed" : null,
   });
