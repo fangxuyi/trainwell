@@ -49,6 +49,10 @@ export default function RootLayout() {
         <Stack.Screen name="history/index" options={{ title: "History" }} />
         <Stack.Screen name="review/[id]" options={{ title: "Review Session" }} />
         <Stack.Screen name="ask" options={{ title: "Ask AI" }} />
+        <Stack.Screen
+          name="import"
+          options={{ title: "Import Workout", presentation: "modal" }}
+        />
       </Stack>
     </>
   );
