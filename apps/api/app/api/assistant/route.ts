@@ -43,9 +43,13 @@ export async function POST(req: NextRequest) {
         trainerNotes: Array<{ text: string }>;
       }> = Array.isArray(s.exercises) ? s.exercises as typeof exercises : [];
 
-      const lines: string[] = [
-        `=== Session ${s.id} | ${date}${durationMin ? ` | ${durationMin} min` : ""} | ${s.workout_type ?? "Workout"}${s.trainer_name ? ` with ${s.trainer_name}` : ""} ===`,
-      ];
+      const header = `=== Session ${s.id} | ${date}${durationMin ? ` | ${durationMin} min` : ""} | ${s.workout_type ?? "Workout"}${s.trainer_name ? ` with ${s.trainer_name}` : ""} ===`;
+
+      if (s.markdown_content && typeof s.markdown_content === "string") {
+        return `${header}\n${s.markdown_content}`;
+      }
+
+      const lines: string[] = [header];
 
       if (s.overall_difficulty != null) {
         lines.push(`Difficulty: ${s.overall_difficulty}/10`);
