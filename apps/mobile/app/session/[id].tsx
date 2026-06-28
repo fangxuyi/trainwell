@@ -11,6 +11,7 @@ import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import type { WorkoutSession } from "@trainwell/schemas";
 import { getSessionById, deleteSession } from "../../src/db/sessions";
+import { apiDelete } from "../../src/utils/api";
 import { runSyncWorker } from "../../src/sync/worker";
 import { getAudioSegmentsBySession } from "../../src/db/audio";
 import { getNotesBySession } from "../../src/db/quickNotes";
@@ -75,7 +76,10 @@ export default function SessionDetailScreen() {
           text: "Delete",
           style: "destructive",
           onPress: async () => {
-            await deleteSession(id);
+            await Promise.all([
+              deleteSession(id),
+              apiDelete(`/api/workouts/${id}`),
+            ]);
             router.replace("/");
           },
         },

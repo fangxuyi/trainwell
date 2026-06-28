@@ -22,6 +22,13 @@ export async function apiGet<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export async function apiDelete(path: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}${path}`, { method: "DELETE" });
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`API DELETE ${path} failed (${res.status})`);
+  }
+}
+
 export async function uploadAudioChunk(
   sessionId: string,
   chunkId: string,
