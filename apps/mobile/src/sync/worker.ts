@@ -1,4 +1,5 @@
 import type { SyncJob } from "@trainwell/schemas";
+import { File } from "expo-file-system";
 import {
   getPendingJobsBySession,
   markJobRunning,
@@ -7,7 +8,9 @@ import {
 } from "../db/syncJobs";
 import {
   getAudioSegmentById,
+  getAudioSegmentsBySession,
   markSegmentUploaded,
+  markSegmentDeleted,
 } from "../db/audio";
 import { apiPost, apiGet, uploadAudioChunk } from "../utils/api";
 import {
@@ -71,6 +74,12 @@ export async function runSyncWorker(sessionId: string): Promise<void> {
       localStatus: "cached",
       syncStatus: "synchronized",
     });
+
+    // Delete local audio files if policy calls for it after transcription
+    const finalSession = await getSessionById(sessionId);
+    if (finalSession?.audioRetentionPolicy === "delete_after_transcription") {
+      await deleteLocalAudio(sessionId);
+    }
   } catch (err) {
     console.error("[SyncWorker] failed for session", sessionId, err);
     await updateSessionStatus(sessionId, {
@@ -125,6 +134,20 @@ async function handleUploadAudioChunk(job: SyncJob): Promise<void> {
   );
 
   await markSegmentUploaded(segment.id, blobUrl ?? "");
+}
+
+export async function deleteLocalAudio(sessionId: string): Promise<void> {
+  const segments = await getAudioSegmentsBySession(sessionId);
+  for (const seg of segments) {
+    if (seg.localStatus === "deleted" || !seg.localPath) continue;
+    try {
+      const file = new File(seg.localPath);
+      if (file.exists) file.delete();
+      await markSegmentDeleted(seg.id);
+    } catch (err) {
+      console.warn("[SyncWorker] Failed to delete audio file", seg.localPath, err);
+    }
+  }
 }
 
 function sleep(ms: number): Promise<void> {

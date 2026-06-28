@@ -237,6 +237,25 @@ export async function getPendingUploadSessions(): Promise<WorkoutSession[]> {
   return rows.map(rowToSession);
 }
 
+export async function saveExerciseEdits(
+  sessionId: string,
+  exercises: unknown[]
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE sessions SET exercises = ?, updated_at = ?, local_version = local_version + 1 WHERE id = ?`,
+    [JSON.stringify(exercises), now(), sessionId]
+  );
+}
+
+export async function finalizeSession(sessionId: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE sessions SET remote_status = 'finalized', updated_at = ?, local_version = local_version + 1 WHERE id = ?`,
+    [now(), sessionId]
+  );
+}
+
 export async function saveSyncResult(
   sessionId: string,
   remote: Record<string, unknown>

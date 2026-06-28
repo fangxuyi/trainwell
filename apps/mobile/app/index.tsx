@@ -85,12 +85,20 @@ export default function HomeScreen() {
         </TouchableOpacity>
       )}
 
-      <TouchableOpacity
-        style={styles.startButton}
-        onPress={() => router.push("/session/new")}
-      >
-        <Text style={styles.startButtonText}>Start New Workout</Text>
-      </TouchableOpacity>
+      <View style={styles.topButtons}>
+        <TouchableOpacity
+          style={styles.startButton}
+          onPress={() => router.push("/session/new")}
+        >
+          <Text style={styles.startButtonText}>Start New Workout</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.askButton}
+          onPress={() => router.push("/ask")}
+        >
+          <Text style={styles.askButtonText}>Ask AI</Text>
+        </TouchableOpacity>
+      </View>
 
       <Text style={styles.sectionTitle}>Recent Sessions</Text>
 
@@ -129,16 +137,34 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
   },
+  topButtons: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 28,
+  },
   startButton: {
+    flex: 1,
     backgroundColor: "#2563EB",
     borderRadius: 14,
     padding: 18,
     alignItems: "center",
-    marginBottom: 28,
   },
   startButtonText: {
     color: "#fff",
-    fontSize: 18,
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  askButton: {
+    backgroundColor: "#1E293B",
+    borderRadius: 14,
+    padding: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 90,
+  },
+  askButtonText: {
+    color: "#38BDF8",
+    fontSize: 16,
     fontWeight: "700",
   },
   sectionTitle: {
