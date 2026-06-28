@@ -31,15 +31,6 @@ export async function POST(req: NextRequest) {
       const durationMin = s.duration_seconds
         ? Math.round((s.duration_seconds as number) / 60)
         : null;
-
-      const header = `=== Session ${s.id} | ${date}${durationMin ? ` | ${durationMin} min` : ""} | ${s.workout_type ?? "Workout"}${s.trainer_name ? ` with ${s.trainer_name}` : ""} ===`;
-
-      // Imported sessions: use full markdown content as context
-      if (s.markdown_content && typeof s.markdown_content === "string") {
-        return `${header}\n${s.markdown_content}`;
-      }
-
-      // Recorded sessions: use structured extraction data
       const exercises: Array<{
         canonicalName: string;
         completed: boolean;
@@ -52,7 +43,9 @@ export async function POST(req: NextRequest) {
         trainerNotes: Array<{ text: string }>;
       }> = Array.isArray(s.exercises) ? s.exercises as typeof exercises : [];
 
-      const lines: string[] = [header];
+      const lines: string[] = [
+        `=== Session ${s.id} | ${date}${durationMin ? ` | ${durationMin} min` : ""} | ${s.workout_type ?? "Workout"}${s.trainer_name ? ` with ${s.trainer_name}` : ""} ===`,
+      ];
 
       if (s.overall_difficulty != null) {
         lines.push(`Difficulty: ${s.overall_difficulty}/10`);

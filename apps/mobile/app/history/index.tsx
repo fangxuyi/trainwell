@@ -6,8 +6,8 @@ import {
   TouchableOpacity,
   ActivityIndicator,
 } from "react-native";
-import { useRouter, useFocusEffect } from "expo-router";
-import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "expo-router";
+import { useEffect, useState } from "react";
 import type { WorkoutSession } from "@trainwell/schemas";
 import { listSessions } from "../../src/db/sessions";
 import { formatDuration } from "../../src/utils/time";
@@ -17,16 +17,11 @@ export default function HistoryScreen() {
   const [sessions, setSessions] = useState<WorkoutSession[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(() => {
+  useEffect(() => {
     listSessions(100)
       .then(setSessions)
       .finally(() => setLoading(false));
   }, []);
-
-  useEffect(load, [load]);
-
-  // Refresh when returning from import modal
-  useFocusEffect(load);
 
   const renderSession = ({ item }: { item: WorkoutSession }) => (
     <TouchableOpacity
@@ -59,13 +54,6 @@ export default function HistoryScreen() {
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity
-        style={styles.importRow}
-        onPress={() => router.push("/import")}
-      >
-        <Text style={styles.importText}>+ Import from Markdown</Text>
-      </TouchableOpacity>
-
       {loading ? (
         <ActivityIndicator color="#38BDF8" style={{ marginTop: 40 }} />
       ) : sessions.length === 0 ? (
@@ -100,15 +88,4 @@ const styles = StyleSheet.create({
   rowDuration: { color: "#64748B", fontSize: 14 },
   rowChevron: { color: "#475569", fontSize: 20 },
   empty: { color: "#475569", textAlign: "center", marginTop: 48, fontSize: 15 },
-  importRow: {
-    margin: 16,
-    marginBottom: 4,
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#1E3A6E",
-    borderStyle: "dashed",
-    alignItems: "center",
-  },
-  importText: { color: "#38BDF8", fontSize: 14, fontWeight: "600" },
 });

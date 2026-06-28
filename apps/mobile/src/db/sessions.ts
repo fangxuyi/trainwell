@@ -302,42 +302,6 @@ export async function saveSyncResult(
   );
 }
 
-export async function importSession(params: {
-  id: string;
-  startedAt: string;
-  endedAt?: string;
-  durationSeconds?: number;
-  markdownContent: string;
-  timezone?: string;
-}): Promise<WorkoutSession> {
-  const db = await getDb();
-  const ts = now();
-
-  await db.runAsync(
-    `INSERT OR IGNORE INTO sessions
-      (id, started_at, ended_at, duration_seconds, timezone,
-       workout_type, processing_mode, audio_retention_policy,
-       local_status, remote_status, sync_status,
-       markdown_content, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'cached', 'finalized', 'synced', ?, ?, ?)`,
-    [
-      params.id,
-      params.startedAt,
-      params.endedAt ?? null,
-      params.durationSeconds ?? null,
-      params.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
-      "Strength Training",
-      "local_only",
-      "keep_forever",
-      params.markdownContent,
-      ts,
-      ts,
-    ]
-  );
-
-  return getSessionById(params.id) as Promise<WorkoutSession>;
-}
-
 export async function deleteSession(id: string): Promise<void> {
   const db = await getDb();
   await db.runAsync("DELETE FROM sessions WHERE id = ?", [id]);
