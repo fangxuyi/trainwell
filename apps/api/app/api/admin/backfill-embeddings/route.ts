@@ -42,9 +42,9 @@ export async function POST(req: NextRequest) {
           accomplishments: Array.isArray(session.accomplishments) ? session.accomplishments as string[] : [],
           improvementAreas: Array.isArray(session.improvement_areas) ? session.improvement_areas as string[] : [],
           painObservations: Array.isArray(session.pain_observations) ? session.pain_observations as ExtractionOutput["painObservations"] : [],
-          nextSessionPlan: session.next_session_plan as ExtractionOutput["nextSessionPlan"] ?? null,
-          overallDifficulty: session.overall_difficulty ? { value: session.overall_difficulty as number, unit: "/10", confidence: 1, status: "explicit", sourceSegmentIds: [] } : null,
-          energyLevel: null,
+          nextSessionPlan: (session.next_session_plan as ExtractionOutput["nextSessionPlan"]) ?? undefined,
+          overallDifficulty: session.overall_difficulty ? { value: session.overall_difficulty as number, unit: "/10", confidence: 1, status: "explicit" as const, sourceSegmentIds: [] } : undefined,
+          energyLevel: undefined,
           openQuestions: [],
         };
         chunks = chunkExtraction(

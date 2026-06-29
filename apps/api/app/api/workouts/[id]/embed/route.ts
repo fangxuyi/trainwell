@@ -41,9 +41,9 @@ export async function POST(
       accomplishments: Array.isArray(session.accomplishments) ? session.accomplishments as string[] : [],
       improvementAreas: Array.isArray(session.improvement_areas) ? session.improvement_areas as string[] : [],
       painObservations: Array.isArray(session.pain_observations) ? session.pain_observations as ExtractionOutput["painObservations"] : [],
-      nextSessionPlan: session.next_session_plan as ExtractionOutput["nextSessionPlan"] ?? null,
-      overallDifficulty: session.overall_difficulty ? { value: session.overall_difficulty as number, unit: "/10", confidence: 1, status: "explicit", sourceSegmentIds: [] } : null,
-      energyLevel: session.energy_level ? { value: session.energy_level as number, unit: "/10", confidence: 1, status: "explicit", sourceSegmentIds: [] } : null,
+      nextSessionPlan: (session.next_session_plan as ExtractionOutput["nextSessionPlan"]) ?? undefined,
+      overallDifficulty: session.overall_difficulty ? { value: session.overall_difficulty as number, unit: "/10", confidence: 1, status: "explicit" as const, sourceSegmentIds: [] } : undefined,
+      energyLevel: session.energy_level ? { value: session.energy_level as number, unit: "/10", confidence: 1, status: "explicit" as const, sourceSegmentIds: [] } : undefined,
       openQuestions: [],
     };
     chunks = chunkExtraction(
