@@ -10,7 +10,8 @@ import { useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 import { useFocusEffect } from "expo-router";
 import type { WorkoutSession } from "@trainwell/schemas";
-import { listSessions, getIncompleteSession, updateSessionStatus } from "../src/db/sessions";
+import { listSessions, getIncompleteSession, updateSessionStatus, upsertSessionsFromServer } from "../src/db/sessions";
+import { apiGet } from "../src/utils/api";
 import { recorder } from "../src/recording/recorder";
 import { formatDuration } from "../src/utils/time";
 
@@ -34,6 +35,10 @@ export default function HomeScreen() {
             await updateSessionStatus(stale.id, { localStatus: "locally_complete" });
           }
         }
+        // Pull any sessions that exist on the server but not locally
+        await apiGet<Record<string, unknown>[]>("/api/workouts")
+          .then((rows) => upsertSessionsFromServer(rows))
+          .catch(() => {}); // ignore if offline
         const [all, incomplete] = await Promise.all([
           listSessions(20),
           recorder.isActive() ? getIncompleteSession() : Promise.resolve(null),

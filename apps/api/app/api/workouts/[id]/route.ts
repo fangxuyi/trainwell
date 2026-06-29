@@ -14,3 +14,12 @@ export async function GET(
   }
   return NextResponse.json(rows[0]);
 }
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  await sql`DELETE FROM sessions WHERE id = ${id}`;
+  return new NextResponse(null, { status: 204 });
+}

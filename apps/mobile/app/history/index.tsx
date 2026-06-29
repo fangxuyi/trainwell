@@ -9,7 +9,8 @@ import {
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import type { WorkoutSession } from "@trainwell/schemas";
-import { listSessions } from "../../src/db/sessions";
+import { listSessions, upsertSessionsFromServer } from "../../src/db/sessions";
+import { apiGet } from "../../src/utils/api";
 import { formatDuration } from "../../src/utils/time";
 
 export default function HistoryScreen() {
@@ -18,9 +19,14 @@ export default function HistoryScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    listSessions(100)
-      .then(setSessions)
-      .finally(() => setLoading(false));
+    apiGet<Record<string, unknown>[]>("/api/workouts")
+      .then((rows) => upsertSessionsFromServer(rows))
+      .catch(() => {})
+      .finally(() =>
+        listSessions(100)
+          .then(setSessions)
+          .finally(() => setLoading(false))
+      );
   }, []);
 
   const renderSession = ({ item }: { item: WorkoutSession }) => (

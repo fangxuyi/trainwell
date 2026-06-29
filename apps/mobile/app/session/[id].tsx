@@ -10,7 +10,8 @@ import {
 import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import type { WorkoutSession } from "@trainwell/schemas";
-import { getSessionById, deleteSession } from "../../src/db/sessions";
+import { getSessionById, deleteSession, listSessions } from "../../src/db/sessions";
+import { apiDelete } from "../../src/utils/api";
 import { runSyncWorker } from "../../src/sync/worker";
 import { getAudioSegmentsBySession } from "../../src/db/audio";
 import { getNotesBySession } from "../../src/db/quickNotes";
@@ -25,18 +26,27 @@ export default function SessionDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [audioCount, setAudioCount] = useState(0);
   const [noteCount, setNoteCount] = useState(0);
+  const [prevId, setPrevId] = useState<string | null>(null);
+  const [nextId, setNextId] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadAll = useCallback(async () => {
-    const [s, segs, notes] = await Promise.all([
+    const [s, segs, notes, all] = await Promise.all([
       getSessionById(id),
       getAudioSegmentsBySession(id),
       getNotesBySession(id),
+      listSessions(200),
     ]);
     setSession(s);
     setAudioCount(segs.length);
     setNoteCount(notes.length);
     setLoading(false);
+
+    const idx = all.findIndex((x) => x.id === id);
+    // listSessions returns newest-first; "previous" = older = higher index
+    setPrevId(idx < all.length - 1 ? all[idx + 1].id : null);
+    setNextId(idx > 0 ? all[idx - 1].id : null);
+
     return s;
   }, [id]);
 
@@ -75,7 +85,10 @@ export default function SessionDetailScreen() {
           text: "Delete",
           style: "destructive",
           onPress: async () => {
-            await deleteSession(id);
+            await Promise.all([
+              deleteSession(id),
+              apiDelete(`/api/workouts/${id}`),
+            ]);
             router.replace("/");
           },
         },
@@ -116,6 +129,33 @@ export default function SessionDetailScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
+      {/* Session navigation */}
+      <View style={styles.navRow}>
+        <TouchableOpacity
+          style={[styles.navButton, !prevId && styles.navButtonDisabled]}
+          disabled={!prevId}
+          onPress={() => prevId && router.replace(`/session/${prevId}`)}
+        >
+          <Text style={[styles.navButtonText, !prevId && styles.navButtonTextDisabled]}>
+            ‹ Older
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.navButton}
+          onPress={() => router.push("/history")}
+        >
+          <Text style={styles.navButtonText}>All Sessions</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.navButton, !nextId && styles.navButtonDisabled]}
+          disabled={!nextId}
+          onPress={() => nextId && router.replace(`/session/${nextId}`)}
+        >
+          <Text style={[styles.navButtonText, !nextId && styles.navButtonTextDisabled]}>
+            Newer ›
+          </Text>
+        </TouchableOpacity>
+      </View>
       {/* Header */}
       <View style={styles.card}>
         <Text style={styles.workoutType}>
@@ -381,6 +421,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   retryButtonText: { color: "#FCA5A5", fontSize: 14, fontWeight: "600" },
+  navRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 16,
+    gap: 8,
+  },
+  navButton: {
+    flex: 1,
+    backgroundColor: "#1E293B",
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  navButtonDisabled: { opacity: 0.3 },
+  navButtonText: { color: "#38BDF8", fontSize: 13, fontWeight: "600" },
+  navButtonTextDisabled: { color: "#64748B" },
   deleteButton: {
     backgroundColor: "transparent",
     borderWidth: 1,
