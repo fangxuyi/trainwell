@@ -35,10 +35,7 @@ export default function HomeScreen() {
             await updateSessionStatus(stale.id, { localStatus: "locally_complete" });
           }
         }
-        // Pull any sessions that exist on the server but not locally
-        await apiGet<Record<string, unknown>[]>("/api/workouts")
-          .then((rows) => upsertSessionsFromServer(rows))
-          .catch(() => {}); // ignore if offline
+        // Show local sessions immediately — don't block on the network.
         const [all, incomplete] = await Promise.all([
           listSessions(20),
           recorder.isActive() ? getIncompleteSession() : Promise.resolve(null),
@@ -46,6 +43,14 @@ export default function HomeScreen() {
         setSessions(all.filter((s) => s.localStatus !== "recording" && s.localStatus !== "paused"));
         setIncompleteSession(incomplete);
         setLoading(false);
+        // Background sync: pull server sessions then refresh the list if anything new.
+        apiGet<Record<string, unknown>[]>("/api/workouts")
+          .then((rows) => upsertSessionsFromServer(rows))
+          .then(() => listSessions(20))
+          .then((refreshed) =>
+            setSessions(refreshed.filter((s) => s.localStatus !== "recording" && s.localStatus !== "paused"))
+          )
+          .catch(() => {}); // ignore if offline or slow
       };
       load();
     }, [])

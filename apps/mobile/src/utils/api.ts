@@ -14,12 +14,16 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`);
-  if (!res.ok) {
-    throw new Error(`API GET ${path} failed (${res.status})`);
+export async function apiGet<T>(path: string, timeoutMs = 5000): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${BASE_URL}${path}`, { signal: controller.signal });
+    if (!res.ok) throw new Error(`API GET ${path} failed (${res.status})`);
+    return res.json() as Promise<T>;
+  } finally {
+    clearTimeout(timer);
   }
-  return res.json() as Promise<T>;
 }
 
 export async function apiDelete(path: string): Promise<void> {

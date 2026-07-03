@@ -19,14 +19,16 @@ export default function HistoryScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Load from local DB immediately so the screen is usable offline.
+    listSessions(100)
+      .then(setSessions)
+      .finally(() => setLoading(false));
+    // Background sync: pull server sessions and refresh if anything changed.
     apiGet<Record<string, unknown>[]>("/api/workouts")
       .then((rows) => upsertSessionsFromServer(rows))
-      .catch(() => {})
-      .finally(() =>
-        listSessions(100)
-          .then(setSessions)
-          .finally(() => setLoading(false))
-      );
+      .then(() => listSessions(100))
+      .then(setSessions)
+      .catch(() => {}); // ignore if offline or slow
   }, []);
 
   const renderSession = ({ item }: { item: WorkoutSession }) => (
