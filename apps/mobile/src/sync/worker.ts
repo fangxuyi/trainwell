@@ -2,6 +2,7 @@ import type { SyncJob } from "@trainwell/schemas";
 import { File } from "expo-file-system";
 import {
   getPendingJobsBySession,
+  getDueJobs,
   markJobRunning,
   markJobCompleted,
   markJobFailed,
@@ -82,10 +83,24 @@ export async function runSyncWorker(sessionId: string): Promise<void> {
     }
   } catch (err) {
     console.error("[SyncWorker] failed for session", sessionId, err);
+    // Check whether there are still retry-able jobs in the queue.
+    // If so, the session is locally complete but waiting for the next
+    // attempt — don't mark it as a permanent error.
+    const retryable = await getPendingJobsBySession(sessionId);
     await updateSessionStatus(sessionId, {
-      localStatus: "local_error",
+      localStatus: retryable.length > 0 ? "locally_complete" : "local_error",
       syncStatus: "failed",
     });
+  }
+}
+
+// Re-run the sync worker for any session that has jobs due for retry.
+// Call this when the app comes to the foreground — internet may be back.
+export async function retryStalledSessions(): Promise<void> {
+  const due = await getDueJobs();
+  const sessionIds = [...new Set(due.map((j) => j.sessionId))];
+  for (const sessionId of sessionIds) {
+    runSyncWorker(sessionId).catch(console.error);
   }
 }
 

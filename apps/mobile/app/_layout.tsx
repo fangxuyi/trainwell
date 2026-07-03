@@ -1,8 +1,10 @@
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
+import { AppState } from "react-native";
 import { getDb } from "../src/db/client";
 import * as Notifications from "expo-notifications";
+import { retryStalledSessions } from "../src/sync/worker";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -15,8 +17,18 @@ Notifications.setNotificationHandler({
 
 export default function RootLayout() {
   useEffect(() => {
-    // Initialize database on first load
     getDb().catch(console.error);
+
+    // When the app comes to the foreground, retry any sessions that were
+    // waiting for internet. The 5-second apiGet timeout means stalled
+    // workers fail quickly, so this covers both "no internet at stop time"
+    // and "app reopened after connectivity restored" cases.
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        retryStalledSessions().catch(console.error);
+      }
+    });
+    return () => sub.remove();
   }, []);
 
   return (
