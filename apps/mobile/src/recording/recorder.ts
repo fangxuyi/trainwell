@@ -125,8 +125,6 @@ class WorkoutRecorder {
         outputFormat: "lpcm",
         audioQuality: 127,
         sampleRate: 44100,
-        numberOfChannels: 1,
-        bitRate: 705600,
         linearPCMBitDepth: 16,
         linearPCMIsBigEndian: false,
         linearPCMIsFloat: false,

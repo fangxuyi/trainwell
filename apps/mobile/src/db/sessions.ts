@@ -346,7 +346,7 @@ export async function upsertSessionsFromServer(
         r.extraction_version ?? null,
         r.created_at ?? ts,
         r.updated_at ?? ts,
-      ]
+      ] as (string | number | boolean | null)[]
     );
   }
 }
