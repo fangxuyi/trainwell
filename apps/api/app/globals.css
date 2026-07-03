@@ -22,5 +22,28 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, sans-serif;
 }
+
+/* Markdown prose styles for session summaries */
+.prose-sm h1, .prose-sm h2, .prose-sm h3 {
+  color: #f4f4f5;
+  font-weight: 600;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+.prose-sm h1 { font-size: 1.125rem; }
+.prose-sm h2 { font-size: 1rem; border-bottom: 1px solid #27272a; padding-bottom: 0.25rem; }
+.prose-sm h3 { font-size: 0.875rem; color: #a1a1aa; }
+.prose-sm p { margin-bottom: 0.75rem; }
+.prose-sm ul, .prose-sm ol { padding-left: 1.25rem; margin-bottom: 0.75rem; }
+.prose-sm li { margin-bottom: 0.25rem; }
+.prose-sm strong { color: #f4f4f5; font-weight: 600; }
+.prose-sm code {
+  background: #27272a;
+  padding: 0.125rem 0.3rem;
+  border-radius: 0.25rem;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.8em;
+}
+.prose-sm hr { border-color: #27272a; margin: 1rem 0; }
