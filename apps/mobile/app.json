@@ -10,6 +10,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.trainwell.app",
+      "teamId": "N8MPUT5VUU",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Trainwell records your workout sessions to transcribe and summarize them.",
         "UIBackgroundModes": [
@@ -50,7 +51,8 @@
           "color": "#0F172A",
           "iosDisplayInForeground": false
         }
-      ]
+      ],
+      "./plugins/withLiveActivity"
     ],
     "experiments": {
       "typedRoutes": true

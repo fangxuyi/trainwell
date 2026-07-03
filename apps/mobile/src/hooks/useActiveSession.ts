@@ -2,6 +2,11 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { WorkoutSession, QuickNote } from "@trainwell/schemas";
 import { recorder } from "../recording/recorder";
 import {
+  startLiveActivity,
+  updateLiveActivity,
+  endLiveActivity,
+} from "../native/LiveActivity";
+import {
   createSession,
   updateSessionStatus,
   getSessionById,
@@ -53,8 +58,10 @@ export function useActiveSession(): ActiveSession {
   const startTick = useCallback(() => {
     if (tickRef.current) clearInterval(tickRef.current);
     tickRef.current = setInterval(() => {
-      setElapsed(recorder.getElapsedSeconds());
+      const secs = recorder.getElapsedSeconds();
+      setElapsed(secs);
       setChunkCount(recorder.getChunkCount());
+      updateLiveActivity(Math.round(secs)).catch(() => {});
     }, 1000);
   }, []);
 
@@ -101,6 +108,10 @@ export function useActiveSession(): ActiveSession {
         setSession(updated);
         setState("recording");
         startTick();
+        startLiveActivity(
+          params.trainerName ?? "",
+          params.workoutType ?? ""
+        ).catch(() => {});
       } catch (err) {
         setError((err as Error).message);
         setState("error");
@@ -138,6 +149,7 @@ export function useActiveSession(): ActiveSession {
     const durationSeconds = Math.round(elapsed);
 
     await recorder.stop();
+    endLiveActivity().catch(() => {});
     await updateSessionStatus(session.id, {
       localStatus: "locally_complete",
       remoteStatus: "not_created",
