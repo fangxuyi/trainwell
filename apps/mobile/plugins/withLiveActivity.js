@@ -301,6 +301,29 @@ function withWidgetTarget(config) {
       WIDGET_BUNDLE_ID
     );
 
+    // xcode 3.x addSourceFile/addResourceFile expect a UUID group key.
+    // addTarget does NOT create a PBX group, so we create one explicitly.
+    const widgetGroupKey = xcodeProject.addPbxGroup(
+      [],
+      WIDGET_TARGET,
+      WIDGET_TARGET
+    ).uuid;
+
+    // Also wire the new group into the root project group so it appears
+    // in the Xcode file navigator.
+    const rootGroupKey = xcodeProject.findPBXGroupKey({ name: projectName })
+      || xcodeProject.findPBXGroupKey({ path: projectName });
+    if (rootGroupKey) {
+      const rootGroup = xcodeProject.getPBXGroupByKey(rootGroupKey);
+      if (rootGroup && !rootGroup.children.some((c) => c.value === widgetGroupKey)) {
+        rootGroup.children.push({ value: widgetGroupKey, comment: WIDGET_TARGET });
+      }
+    }
+
+    // Main app group key (created by expo prebuild, named after the project)
+    const mainGroupKey = xcodeProject.findPBXGroupKey({ name: projectName })
+      || xcodeProject.findPBXGroupKey({ path: projectName });
+
     // Add Swift source files to widget target
     const widgetSources = [
       "TrainwellAttributes.swift",
@@ -312,16 +335,13 @@ function withWidgetTarget(config) {
       xcodeProject.addSourceFile(
         `${WIDGET_TARGET}/${file}`,
         { target: widgetTarget.uuid },
-        widgetTarget.pbxNativeTarget.productName
+        widgetGroupKey
       );
     });
 
-    // Add Info.plist as a resource (not compiled)
-    xcodeProject.addResourceFile(
-      `${WIDGET_TARGET}/Info.plist`,
-      { target: widgetTarget.uuid },
-      widgetTarget.pbxNativeTarget.productName
-    );
+    // Info.plist is referenced via INFOPLIST_FILE build setting — no need
+    // to add it to the PBX file navigator (addResourceFile crashes on
+    // projects with no Resources PBX group).
 
     // Add native module files to main target
     const mainTarget = xcodeProject.pbxTargetByName(projectName);
@@ -329,17 +349,17 @@ function withWidgetTarget(config) {
       xcodeProject.addSourceFile(
         `${projectName}/TrainwellAttributes.swift`,
         { target: mainTarget.uuid },
-        projectName
+        mainGroupKey
       );
       xcodeProject.addSourceFile(
         `${projectName}/LiveActivityModule.swift`,
         { target: mainTarget.uuid },
-        projectName
+        mainGroupKey
       );
       xcodeProject.addSourceFile(
         `${projectName}/LiveActivityModule.m`,
         { target: mainTarget.uuid },
-        projectName
+        mainGroupKey
       );
     }
 
@@ -368,7 +388,9 @@ function withWidgetTarget(config) {
       });
 
     // Add dependency: main target → widget target
-    xcodeProject.addTargetDependency(projectName, [widgetTarget.uuid]);
+    if (mainTarget) {
+      xcodeProject.addTargetDependency(mainTarget.uuid, [widgetTarget.uuid]);
+    }
 
     // Add "Embed Foundation Extensions" copy phase to main target
     xcodeProject.addBuildPhase(
