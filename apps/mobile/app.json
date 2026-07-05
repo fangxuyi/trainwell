@@ -44,14 +44,6 @@
         }
       ],
       "expo-audio",
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/icon.png",
-          "color": "#0F172A",
-          "iosDisplayInForeground": false
-        }
-      ],
       "./plugins/withLiveActivity"
     ],
     "experiments": {
