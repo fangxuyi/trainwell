@@ -6,6 +6,7 @@ const {
   withXcodeProject,
   withInfoPlist,
   withDangerousMod,
+  withEntitlementsPlist,
 } = require("@expo/config-plugins");
 const path = require("path");
 const fs = require("fs");
@@ -268,11 +269,25 @@ function withWidgetFiles(config) {
       fs.writeFileSync(path.join(widgetDir, "TrainwellAttributes.swift"), TRAINWELL_ATTRIBUTES);
       fs.writeFileSync(path.join(widgetDir, "TrainwellLiveActivity.swift"), TRAINWELL_LIVE_ACTIVITY);
       fs.writeFileSync(path.join(widgetDir, "TrainwellWidgetBundle.swift"), TRAINWELL_WIDGET_BUNDLE);
-      fs.writeFileSync(path.join(widgetDir, "Info.plist"), WIDGET_INFO_PLIST);
+      fs.writeFileSync(path.join(widgetDir, `${WIDGET_TARGET}-Info.plist`), WIDGET_INFO_PLIST);
 
       fs.writeFileSync(path.join(mainDir, "TrainwellAttributes.swift"), LIVE_ACTIVITY_ATTRIBUTES);
       fs.writeFileSync(path.join(mainDir, "LiveActivityModule.swift"), LIVE_ACTIVITY_MODULE_SWIFT);
       fs.writeFileSync(path.join(mainDir, "LiveActivityModule.m"), LIVE_ACTIVITY_MODULE_M);
+
+      // Expose React bridge types to Swift — the generated bridging header is
+      // empty by default and doesn't include RCTBridgeModule.h.
+      const bridgingHeaderName = `${config.modRequest.projectName || "Trainwell"}-Bridging-Header.h`;
+      const bridgingHeaderPath = path.join(mainDir, bridgingHeaderName);
+      if (fs.existsSync(bridgingHeaderPath)) {
+        const current = fs.readFileSync(bridgingHeaderPath, "utf8");
+        if (!current.includes("RCTBridgeModule.h")) {
+          fs.writeFileSync(
+            bridgingHeaderPath,
+            current + "\n#import <React/RCTBridgeModule.h>\n"
+          );
+        }
+      }
 
       return config;
     },
@@ -300,6 +315,13 @@ function withWidgetTarget(config) {
       WIDGET_TARGET,
       WIDGET_BUNDLE_ID
     );
+
+    // addTarget creates the native target with buildPhases:[]. The xcode
+    // library's buildPhaseObject() falls back to the FIRST Sources phase it
+    // finds when the target has no Sources phase yet — which is the main
+    // app's phase. Explicitly create the widget's Sources phase first so
+    // subsequent addSourceFile calls route to the correct target.
+    xcodeProject.addBuildPhase([], "PBXSourcesBuildPhase", "Sources", widgetTarget.uuid);
 
     // xcode 3.x addSourceFile/addResourceFile expect a UUID group key.
     // addTarget does NOT create a PBX group, so we create one explicitly.
@@ -333,7 +355,7 @@ function withWidgetTarget(config) {
 
     widgetSources.forEach((file) => {
       xcodeProject.addSourceFile(
-        `${WIDGET_TARGET}/${file}`,
+        file,
         { target: widgetTarget.uuid },
         widgetGroupKey
       );
@@ -346,6 +368,8 @@ function withWidgetTarget(config) {
     // Add native module files to main target
     const mainTarget = xcodeProject.pbxTargetByName(projectName);
     if (mainTarget) {
+      // Main Trainwell group has no path, so file refs need the full
+      // relative path (same pattern as AppDelegate.swift → "Trainwell/AppDelegate.swift").
       xcodeProject.addSourceFile(
         `${projectName}/TrainwellAttributes.swift`,
         { target: mainTarget.uuid },
@@ -363,43 +387,34 @@ function withWidgetTarget(config) {
       );
     }
 
-    // Configure build settings for the widget target
-    const widgetBuildConfigs = xcodeProject.pbxXCBuildConfigurationSection();
-    Object.keys(widgetBuildConfigs)
-      .filter((key) => !key.endsWith("_comment"))
-      .filter((key) => {
-        const cfg = widgetBuildConfigs[key];
-        return (
-          cfg.buildSettings &&
-          xcodeProject.getBuildConfigByName(key)?.target === widgetTarget.uuid
-        );
-      })
-      .forEach((key) => {
-        const settings = widgetBuildConfigs[key].buildSettings;
-        settings.INFOPLIST_FILE = `"${WIDGET_TARGET}/Info.plist"`;
-        settings.PRODUCT_BUNDLE_IDENTIFIER = `"${WIDGET_BUNDLE_ID}"`;
-        settings.SWIFT_VERSION = "5.0";
-        settings.TARGETED_DEVICE_FAMILY = '"1"';
-        settings.IPHONEOS_DEPLOYMENT_TARGET = DEPLOYMENT_TARGET;
-        settings.DEVELOPMENT_TEAM = devTeam ? `"${devTeam}"` : undefined;
-        settings.SKIP_INSTALL = "YES";
-        settings.CODE_SIGN_STYLE = "Automatic";
-        delete settings.ASSETCATALOG_COMPILER_APPICON_NAME;
-      });
-
-    // Add dependency: main target → widget target
-    if (mainTarget) {
-      xcodeProject.addTargetDependency(mainTarget.uuid, [widgetTarget.uuid]);
-    }
-
-    // Add "Embed Foundation Extensions" copy phase to main target
-    xcodeProject.addBuildPhase(
-      [widgetTarget.uuid],
-      "PBXCopyFilesBuildPhase",
-      "Embed Foundation Extensions",
-      mainTarget?.uuid,
-      "13" // PlugIns/Extensions destination
+    // Configure build settings for the widget target.
+    // Navigate from the target → XCConfigurationList → individual config UUIDs
+    // to avoid accidentally modifying other targets' configs.
+    const configListUuid = widgetTarget.pbxNativeTarget.buildConfigurationList;
+    const configList =
+      xcodeProject.hash.project.objects["XCConfigurationList"][configListUuid];
+    const widgetConfigUuids = (configList?.buildConfigurations || []).map(
+      (c) => c.value
     );
+    const allBuildConfigs = xcodeProject.pbxXCBuildConfigurationSection();
+    widgetConfigUuids.forEach((uuid) => {
+      const cfg = allBuildConfigs[uuid];
+      if (!cfg?.buildSettings) return;
+      const settings = cfg.buildSettings;
+      settings.PRODUCT_BUNDLE_IDENTIFIER = `"${WIDGET_BUNDLE_ID}"`;
+      settings.SWIFT_VERSION = "5.0";
+      settings.TARGETED_DEVICE_FAMILY = '"1"';
+      settings.IPHONEOS_DEPLOYMENT_TARGET = DEPLOYMENT_TARGET;
+      if (devTeam) settings.DEVELOPMENT_TEAM = `"${devTeam}"`;
+      settings.SKIP_INSTALL = "YES";
+      settings.CODE_SIGN_STYLE = "Automatic";
+      delete settings.ASSETCATALOG_COMPILER_APPICON_NAME;
+    });
+
+    // Note: addTarget('app_extension') already calls addTargetDependency(mainTarget, [widget])
+    // and creates a "Copy Files" (dstSubfolderSpec=13 / PlugIns) phase in the main target
+    // with the widget .appex product added. No manual addBuildPhase or addTargetDependency
+    // calls needed — doing so creates duplicate/broken phases.
 
     return config;
   });
@@ -415,11 +430,25 @@ function withLiveActivityInfoPlist(config) {
   });
 }
 
+// ─── Step 4: Strip push-notifications entitlement ────────────────────────────
+// expo-notifications auto-registers via app.plugin.js and writes
+// aps-environment into the entitlements even when not listed in plugins[].
+// Personal Apple developer teams can't provision push notifications, so we
+// remove it here (we only use local notifications, not remote push).
+
+function withNoPushEntitlement(config) {
+  return withEntitlementsPlist(config, (config) => {
+    delete config.modResults["aps-environment"];
+    return config;
+  });
+}
+
 // ─── Compose all mods ─────────────────────────────────────────────────────────
 
 module.exports = function withLiveActivity(config) {
   config = withWidgetFiles(config);
   config = withWidgetTarget(config);
   config = withLiveActivityInfoPlist(config);
+  config = withNoPushEntitlement(config);
   return config;
 };
