@@ -48,7 +48,7 @@ export async function uploadAudioChunk(
     form.append("durationSeconds", String(durationSeconds));
     form.append("sizeBytes", String(sizeBytes));
     // XHR's native FormData in React Native handles { uri, name, type } file objects
-    form.append("audio", { uri: localPath, name: "audio.wav", type: "audio/wav" } as any);
+    form.append("audio", { uri: localPath, name: "audio.m4a", type: "audio/mp4" } as any);
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${BASE_URL}/api/workouts/${sessionId}/audio-segments`);

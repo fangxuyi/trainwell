@@ -102,6 +102,25 @@ function cafToWav(caf: ArrayBuffer): ArrayBuffer | null {
   return out.buffer;
 }
 
+// Groq's audio transcription endpoint rejects files above this size (25 MB on
+// the free tier; 100 MB on the dev tier). We check it explicitly and up front so
+// an oversized session fails with a clear, actionable message instead of an
+// opaque Groq error. Override via GROQ_MAX_AUDIO_BYTES if on a higher tier.
+const GROQ_MAX_AUDIO_BYTES = Number(process.env.GROQ_MAX_AUDIO_BYTES) || 25 * 1024 * 1024;
+
+// Detects the container from the leading bytes and returns the filename +
+// content type Groq should see (it infers the codec from these).
+function audioDescriptor(raw: ArrayBuffer): { name: string; type: string } {
+  const view = new DataView(raw);
+  const magic = readStr(view, 0);
+  // MP4/M4A files start with a 4-byte box size followed by "ftyp".
+  if (raw.byteLength >= 8 && readStr(view, 4) === "ftyp") {
+    return { name: "audio.m4a", type: "audio/mp4" };
+  }
+  if (magic === "RIFF") return { name: "audio.wav", type: "audio/wav" };
+  return { name: "audio.wav", type: "audio/wav" };
+}
+
 async function transcribeBuffer(
   raw: ArrayBuffer,
   audioSegmentId: string,
@@ -111,7 +130,7 @@ async function transcribeBuffer(
   console.log(`[transcribe] chunk=${audioSegmentId} magic="${magic}" size=${raw.byteLength}`);
 
   let audioBuffer = raw;
-  let audioName = "audio.wav";
+  let descriptor = audioDescriptor(raw);
 
   if (magic === "caff") {
     const wav = cafToWav(raw);
@@ -121,11 +140,22 @@ async function transcribeBuffer(
       );
     }
     audioBuffer = wav;
+    descriptor = { name: "audio.wav", type: "audio/wav" };
     console.log(`[transcribe] CAF→WAV conversion: ${raw.byteLength}B → ${wav.byteLength}B`);
   }
 
+  if (audioBuffer.byteLength > GROQ_MAX_AUDIO_BYTES) {
+    const mb = (n: number) => (n / 1024 / 1024).toFixed(1);
+    throw new Error(
+      `Audio segment ${audioSegmentId} is ${mb(audioBuffer.byteLength)} MB, ` +
+        `over Groq's ${mb(GROQ_MAX_AUDIO_BYTES)} MB per-file limit. ` +
+        `The session is too long to transcribe in one request — split it into ` +
+        `smaller pieces or lower the recording bitrate.`
+    );
+  }
+
   const form = new FormData();
-  form.append("file", new Blob([audioBuffer], { type: "audio/wav" }), audioName);
+  form.append("file", new Blob([audioBuffer], { type: descriptor.type }), descriptor.name);
   form.append("model", "whisper-large-v3-turbo");
   form.append("response_format", "verbose_json");
   form.append("timestamp_granularities[]", "segment");

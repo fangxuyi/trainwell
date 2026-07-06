@@ -5,7 +5,7 @@ import {
   RecordingPresets,
 } from "expo-audio";
 import { File, Directory, Paths } from "expo-file-system";
-import { createAudioSegment, finalizeAudioSegment, getNextSequenceNumber } from "../db/audio";
+import { createAudioSegment, finalizeAudioSegment } from "../db/audio";
 import {
   setupNotificationChannel,
   requestNotificationPermission,
@@ -14,17 +14,40 @@ import {
   dismissRecordingNotification,
 } from "./lockScreen";
 
-const CHUNK_DURATION_MS = 60_000;
+// Lock-screen notification refresh cadence. Not chunking — the whole session is
+// recorded as ONE continuous file so the audio session is activated once (in the
+// foreground) and never re-activated. Re-activating from the background is what
+// iOS rejects with CannotInterruptOthers, which is why we no longer rotate
+// recorders mid-session.
+const NOTIFICATION_REFRESH_MS = 15_000;
+
+// Compressed AAC / .m4a, mono, 16 kHz, 24 kbps CBR. Groq accepts m4a natively.
+// At ~3 KB/s a 90-min session is ~16 MB — under Groq's 25 MB per-file limit, so
+// the whole recording transcribes in one call (no server-side splitting).
+// CBR (not VBR) keeps the size predictable so the explicit Groq size check is
+// meaningful. These options MUST be passed to prepareToRecordAsync(), not only
+// the constructor: expo-audio only flattens the platform (`ios`) block inside
+// its prepareToRecordAsync prototype shim, so passing them only to
+// `new AudioRecorder(...)` leaves the native side recording an unpredictable
+// default container — the bug that used to produce CAF instead of the requested
+// format.
+const RECORDING_OPTIONS = {
+  ...RecordingPresets.HIGH_QUALITY, // .m4a / MPEG4AAC base
+  sampleRate: 16000,
+  numberOfChannels: 1,
+  bitRate: 24000,
+  isMeteringEnabled: true,
+};
 
 class WorkoutRecorder {
   private recorder: InstanceType<typeof AudioModule.AudioRecorder> | null = null;
   private sessionId: string | null = null;
-  private chunkTimer: ReturnType<typeof setTimeout> | null = null;
+  private heartbeat: ReturnType<typeof setInterval> | null = null;
   private startTime: number = 0;
   private elapsedAtPause: number = 0;
   private onChunkSaved?: (segmentId: string) => void;
   private onError?: (err: Error) => void;
-  private chunkCount = 0;
+  private savedSegmentCount = 0;
   private isPaused = false;
 
   async requestPermissions(): Promise<boolean> {
@@ -55,27 +78,34 @@ class WorkoutRecorder {
     this.onError = callbacks.onError;
     this.elapsedAtPause = 0;
     this.startTime = 0;
-    this.chunkCount = 0;
+    this.savedSegmentCount = 0;
     this.isPaused = false;
 
     await setAudioModeAsync({
       allowsRecording: true,
       playsInSilentMode: true,
+      interruptionMode: "mixWithOthers",
       shouldPlayInBackground: true,
       allowsBackgroundRecording: true,
     });
 
-    await this.startChunk();
-    this.scheduleNextChunk();
+    const recorder = this.buildRecorder();
+    // Pass options here (not only to the constructor) so the format is actually
+    // applied — see RECORDING_OPTIONS above.
+    await recorder.prepareToRecordAsync(RECORDING_OPTIONS as any);
+    recorder.record();
+    this.recorder = recorder;
+    this.startTime = Date.now();
+
     await showRecordingNotification(0);
+    this.startHeartbeat();
   }
 
   async pause(): Promise<void> {
     if (!this.recorder || this.isPaused) return;
     this.elapsedAtPause += (Date.now() - this.startTime) / 1000;
     this.isPaused = true;
-    clearTimeout(this.chunkTimer!);
-    this.chunkTimer = null;
+    this.stopHeartbeat();
     this.recorder.pause();
   }
 
@@ -84,15 +114,16 @@ class WorkoutRecorder {
     this.isPaused = false;
     this.startTime = Date.now();
     this.recorder.record();
-    this.scheduleNextChunk();
+    this.startHeartbeat();
   }
 
   async stop(): Promise<void> {
-    clearTimeout(this.chunkTimer!);
-    this.chunkTimer = null;
+    this.stopHeartbeat();
     if (this.recorder) {
-      await this.finalizeCurrentChunk();
+      const recorder = this.recorder;
       this.recorder = null;
+      await recorder.stop();
+      await this.persistRecording(recorder);
     }
     this.sessionId = null;
     this.isPaused = false;
@@ -105,71 +136,48 @@ class WorkoutRecorder {
   }
 
   getChunkCount(): number {
-    return this.chunkCount;
+    return this.savedSegmentCount;
   }
 
   isActive(): boolean {
     return this.recorder !== null || this.sessionId !== null;
   }
 
-  private async startChunk(): Promise<void> {
+  private buildRecorder(): InstanceType<typeof AudioModule.AudioRecorder> {
+    return new AudioModule.AudioRecorder(RECORDING_OPTIONS as any);
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.heartbeat = setInterval(() => {
+      updateRecordingNotification(this.getElapsedSeconds()).catch(() => {});
+    }, NOTIFICATION_REFRESH_MS);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeat) {
+      clearInterval(this.heartbeat);
+      this.heartbeat = null;
+    }
+  }
+
+  // Move the finished recording into the session's audio directory and register
+  // it as the session's single audio segment (sequence 0). The server splits it
+  // into transcription-sized windows after upload.
+  private async persistRecording(
+    recorder: InstanceType<typeof AudioModule.AudioRecorder>
+  ): Promise<void> {
     if (!this.sessionId) return;
 
-    if (this.startTime > 0) {
-      this.elapsedAtPause += (Date.now() - this.startTime) / 1000;
-    }
-
-    const recorder = new AudioModule.AudioRecorder({
-      ios: {
-        extension: ".wav",
-        outputFormat: "lpcm",
-        audioQuality: 127,
-        sampleRate: 44100,
-        linearPCMBitDepth: 16,
-        linearPCMIsBigEndian: false,
-        linearPCMIsFloat: false,
-      },
-      android: (RecordingPresets.HIGH_QUALITY as any).android,
-      isMeteringEnabled: true,
-    });
-    await recorder.prepareToRecordAsync();
-    recorder.record();
-    this.recorder = recorder;
-    this.startTime = Date.now();
-    this.chunkCount++;
-  }
-
-  private scheduleNextChunk(): void {
-    this.chunkTimer = setTimeout(async () => {
-      try {
-        await this.finalizeCurrentChunk();
-        await this.startChunk();
-        this.scheduleNextChunk();
-      } catch (err) {
-        this.onError?.(err as Error);
-      }
-    }, CHUNK_DURATION_MS);
-  }
-
-  private async finalizeCurrentChunk(): Promise<void> {
-    if (!this.recorder || !this.sessionId) return;
-
     const sessionId = this.sessionId;
-    const recorder = this.recorder;
-    this.recorder = null;
-    await recorder.stop();
-
     const uri = recorder.uri;
     if (!uri) return;
-
-    const sequence = await getNextSequenceNumber(sessionId);
 
     const destDir = new Directory(Paths.document, "sessions", sessionId, "audio");
     if (!destDir.exists) destDir.create({ intermediates: true });
 
-    const chunkName = `chunk_${String(sequence).padStart(4, "0")}.wav`;
+    const destFile = new File(destDir, "recording.m4a");
     const srcFile = new File(uri);
-    const destFile = new File(destDir, chunkName);
     if (destFile.exists) destFile.delete();
     srcFile.move(destFile);
 
@@ -177,17 +185,17 @@ class WorkoutRecorder {
 
     const segment = await createAudioSegment({
       sessionId,
-      sequence,
+      sequence: 0,
       localPath: destFile.uri,
     });
 
     await finalizeAudioSegment(segment.id, {
-      durationSeconds: CHUNK_DURATION_MS / 1000,
+      durationSeconds: this.getElapsedSeconds(),
       sizeBytes,
     });
 
+    this.savedSegmentCount = 1;
     this.onChunkSaved?.(segment.id);
-    updateRecordingNotification(this.getElapsedSeconds()).catch(() => {});
   }
 }
 
