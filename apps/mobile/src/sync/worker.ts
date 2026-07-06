@@ -24,6 +24,19 @@ const POLL_INTERVAL_MS = 5000;
 const MAX_POLL_ATTEMPTS = 60; // 5 minutes
 
 export async function runSyncWorker(sessionId: string): Promise<void> {
+  // Skip sessions that haven't been stopped yet — create_remote_session hasn't
+  // been enqueued and the server session doesn't exist, so chunk uploads would
+  // fail with a FK violation.
+  const sessionCheck = await getSessionById(sessionId);
+  if (!sessionCheck) return;
+  if (
+    sessionCheck.localStatus === "draft" ||
+    sessionCheck.localStatus === "recording" ||
+    sessionCheck.localStatus === "paused"
+  ) {
+    return;
+  }
+
   await updateSessionStatus(sessionId, { localStatus: "syncing", syncStatus: "pending" });
 
   try {

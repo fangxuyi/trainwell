@@ -110,7 +110,9 @@ export default function ActiveSessionScreen() {
         audioRetentionPolicy:
           params.audioRetentionPolicy ?? "delete_after_review",
       }).catch((err) =>
-        Alert.alert("Recording Error", (err as Error).message)
+        Alert.alert("Recording Error", (err as Error).message, [
+          { text: "OK", onPress: () => router.replace("/") },
+        ])
       );
     }
   }, []);
@@ -133,10 +135,17 @@ export default function ActiveSessionScreen() {
           text: "End Workout",
           style: "destructive",
           onPress: async () => {
-            const finished = await stop();
-            if (finished) {
-              router.replace(`/session/${finished.id}`);
-            } else {
+            try {
+              const timeout = new Promise<null>((resolve) =>
+                setTimeout(() => resolve(null), 8000)
+              );
+              const finished = await Promise.race([stop(), timeout]);
+              if (finished) {
+                router.replace(`/session/${finished.id}`);
+              } else {
+                router.replace("/");
+              }
+            } catch {
               router.replace("/");
             }
           },
