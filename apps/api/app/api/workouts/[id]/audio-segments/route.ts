@@ -22,11 +22,58 @@ export async function POST(
 ) {
   const { id: sessionId } = await params;
 
-  const formData = await req.formData();
-  const chunkId = formData.get("chunkId") as string;
-  const sequence = parseInt(formData.get("sequence") as string, 10);
-  const sha256 = formData.get("sha256") as string | null;
-  const audioFile = formData.get("audio") as File | null;
+  // Two upload paths:
+  //  - application/json: the phone already uploaded the file directly to Blob
+  //    (presigned PUT, bypassing the 4.5 MB serverless limit) and sends the
+  //    resulting blobUrl. This is the path for full-length sessions.
+  //  - multipart/form-data: the phone sends the file bytes and we put() it.
+  //    Kept for small files / backward compatibility.
+  const isJson = req.headers.get("content-type")?.includes("application/json");
+
+  let chunkId: string;
+  let sequence: number;
+  let sha256: string | null = null;
+  let durationSeconds = 0;
+  let sizeBytes = 0;
+  let blobUrl: string | null = null;
+
+  if (isJson) {
+    const body = (await req.json()) as {
+      chunkId?: string;
+      sequence?: number;
+      blobUrl?: string;
+      sha256?: string;
+      durationSeconds?: number;
+      sizeBytes?: number;
+    };
+    chunkId = body.chunkId ?? "";
+    sequence = body.sequence ?? NaN;
+    blobUrl = body.blobUrl ?? null;
+    sha256 = body.sha256 ?? null;
+    durationSeconds = body.durationSeconds ?? 0;
+    sizeBytes = body.sizeBytes ?? 0;
+
+    if (!blobUrl) {
+      return NextResponse.json({ error: "blobUrl is required" }, { status: 400 });
+    }
+  } else {
+    const formData = await req.formData();
+    chunkId = formData.get("chunkId") as string;
+    sequence = parseInt(formData.get("sequence") as string, 10);
+    sha256 = formData.get("sha256") as string | null;
+    durationSeconds = parseFloat((formData.get("durationSeconds") as string) ?? "0");
+    sizeBytes = parseInt((formData.get("sizeBytes") as string) ?? "0", 10);
+
+    const audioFile = formData.get("audio") as File | null;
+    if (audioFile) {
+      const blob = await put(
+        `sessions/${sessionId}/audio/chunk_${String(sequence).padStart(4, "0")}.m4a`,
+        audioFile,
+        { access: "private", contentType: "audio/mp4", addRandomSuffix: false }
+      );
+      blobUrl = blob.url;
+    }
+  }
 
   if (!chunkId || isNaN(sequence)) {
     return NextResponse.json(
@@ -41,20 +88,6 @@ export async function POST(
   `;
   if (existing.length > 0 && existing[0].remote_status === "transcribed") {
     return NextResponse.json(existing[0], { status: 200 });
-  }
-
-  const durationSeconds = parseFloat((formData.get("durationSeconds") as string) ?? "0");
-  const sizeBytes = parseInt((formData.get("sizeBytes") as string) ?? "0", 10);
-
-  let blobUrl: string | null = null;
-
-  if (audioFile) {
-    const blob = await put(
-      `sessions/${sessionId}/audio/chunk_${String(sequence).padStart(4, "0")}.m4a`,
-      audioFile,
-      { access: "private", contentType: "audio/mp4", addRandomSuffix: false }
-    );
-    blobUrl = blob.url;
   }
 
   // Save audio segment row first
