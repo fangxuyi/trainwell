@@ -118,6 +118,33 @@ export async function POST(
 
       const transcriptSegs = await transcribeAudioUrl(blobUrl, chunkId, offsetSeconds);
 
+      // Guard the silent no-op: a workout chunk that transcribes to zero
+      // segments almost always means a format/codec mismatch (e.g. an m4a sent
+      // to a server that hands Groq the wrong content type) rather than genuine
+      // silence. Surface it and mark the segment failed instead of falsely
+      // reporting it "transcribed" and letting the pipeline die later with a
+      // vague "no transcript segments" error.
+      if (transcriptSegs.length === 0) {
+        console.error(
+          `Transcription produced 0 segments for chunk ${chunkId} ` +
+            `(session ${sessionId}). Likely an audio format/codec mismatch.`
+        );
+        await sql`
+          UPDATE audio_segments SET remote_status = 'failed', updated_at = now()
+          WHERE id = ${chunkId}
+        `;
+        segment.remote_status = "failed";
+        return NextResponse.json(
+          {
+            ...segment,
+            warning: "transcription_empty",
+            message:
+              "Audio uploaded but transcription returned no text — check the audio format reaching Groq.",
+          },
+          { status: 201 }
+        );
+      }
+
       for (const seg of transcriptSegs) {
         await sql`
           INSERT INTO transcript_segments (
@@ -137,8 +164,23 @@ export async function POST(
       `;
       segment.remote_status = "transcribed";
     } catch (err) {
-      // Log but don't fail the upload — pipeline can retry transcription
+      // Don't 500 the upload (the audio is safely stored), but do NOT swallow
+      // the failure silently: persist it on the segment so it's queryable and
+      // the pipeline can report the real reason instead of a generic error.
       console.error(`Transcription failed for chunk ${chunkId}:`, err);
+      await sql`
+        UPDATE audio_segments SET remote_status = 'failed', updated_at = now()
+        WHERE id = ${chunkId}
+      `;
+      return NextResponse.json(
+        {
+          ...segment,
+          remote_status: "failed",
+          warning: "transcription_failed",
+          message: (err as Error).message,
+        },
+        { status: 201 }
+      );
     }
   }
 
