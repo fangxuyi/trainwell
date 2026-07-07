@@ -237,6 +237,22 @@ export async function getPendingUploadSessions(): Promise<WorkoutSession[]> {
   return rows.map(rowToSession);
 }
 
+// Sessions that started syncing but never reached a synchronized state — e.g.
+// the app was killed mid-sync while the server finished the job on its own.
+// Re-running the sync worker for these pulls down the finished result.
+export async function getUnsyncedSessions(): Promise<WorkoutSession[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<Record<string, unknown>>(
+    `SELECT * FROM sessions
+     WHERE local_status IN ('syncing', 'locally_complete', 'awaiting_upload')
+       AND sync_status != 'synchronized'
+       AND processing_mode != 'local_only'
+     ORDER BY started_at DESC
+     LIMIT 20`
+  );
+  return rows.map(rowToSession);
+}
+
 export async function saveExerciseEdits(
   sessionId: string,
   exercises: unknown[]
