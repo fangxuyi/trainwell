@@ -29,11 +29,26 @@ export async function POST(
   const body = (await req.json().catch(() => ({}))) as {
     sequence?: number;
     contentType?: string;
+    chunkId?: string;
   };
   const sequence = body.sequence ?? 0;
   const contentType = body.contentType ?? "audio/mp4";
+  const chunkId = body.chunkId ?? "";
 
   const pathname = `sessions/${sessionId}/audio/chunk_${String(sequence).padStart(4, "0")}.m4a`;
+
+  // When the blob upload finishes, Vercel Blob POSTs this callback — which lets
+  // the server transcribe + run the pipeline even if the app was backgrounded or
+  // killed mid-upload (the file keeps uploading on a native background session,
+  // but the app's JS never runs again). tokenPayload carries what the callback
+  // needs; the secret lets it reject spoofed calls.
+  const callbackUrl = `${req.nextUrl.origin}/api/blob/upload-complete`;
+  const tokenPayload = JSON.stringify({
+    sessionId,
+    chunkId,
+    sequence,
+    secret: process.env.BLOB_CALLBACK_SECRET ?? "",
+  });
 
   const signed = await issueSignedToken({
     pathname,
@@ -53,6 +68,7 @@ export async function POST(
       access: "private",
       allowedContentTypes: [contentType],
       maximumSizeInBytes: MAX_UPLOAD_BYTES,
+      onUploadCompleted: { callbackUrl, tokenPayload },
     }
   );
 
