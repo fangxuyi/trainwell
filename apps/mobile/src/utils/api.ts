@@ -1,3 +1,5 @@
+import { File } from "expo-file-system";
+
 const BASE_URL =
   process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
 
@@ -33,6 +35,11 @@ export async function apiDelete(path: string): Promise<void> {
   }
 }
 
+const AUDIO_CONTENT_TYPE = "audio/mp4";
+
+// Uploads a recording straight to Vercel Blob via a presigned PUT, then registers
+// it with the server (which transcribes it). Going direct-to-Blob bypasses
+// Vercel's 4.5 MB serverless request-body limit, so full-length sessions upload.
 export async function uploadAudioChunk(
   sessionId: string,
   chunkId: string,
@@ -41,30 +48,39 @@ export async function uploadAudioChunk(
   durationSeconds: number,
   sizeBytes: number
 ): Promise<string | null> {
-  return new Promise((resolve, reject) => {
-    const form = new FormData();
-    form.append("chunkId", chunkId);
-    form.append("sequence", String(sequence));
-    form.append("durationSeconds", String(durationSeconds));
-    form.append("sizeBytes", String(sizeBytes));
-    // XHR's native FormData in React Native handles { uri, name, type } file objects
-    form.append("audio", { uri: localPath, name: "audio.m4a", type: "audio/mp4" } as any);
-
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${BASE_URL}/api/workouts/${sessionId}/audio-segments`);
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          const data = JSON.parse(xhr.responseText) as { blob_url?: string };
-          resolve(data.blob_url ?? null);
-        } catch {
-          resolve(null);
-        }
-      } else {
-        reject(new Error(`Upload chunk failed (${xhr.status}): ${xhr.responseText}`));
-      }
-    };
-    xhr.onerror = () => reject(new Error("Network error during chunk upload"));
-    xhr.send(form);
+  // 1. Ask the server for a presigned PUT URL (+ the eventual blob URL).
+  const { presignedUrl, blobUrl, apiVersion } = await apiPost<{
+    presignedUrl: string;
+    blobUrl: string;
+    apiVersion: string;
+  }>(`/api/workouts/${sessionId}/audio-upload-url`, {
+    sequence,
+    contentType: AUDIO_CONTENT_TYPE,
   });
+
+  // 2. Stream the file from disk directly to Blob. The presigned URL carries
+  //    auth in its query params; the PUT just needs the matching content type.
+  const file = new File(localPath);
+  const result = await file.upload(presignedUrl, {
+    httpMethod: "PUT",
+    headers: {
+      "x-content-type": AUDIO_CONTENT_TYPE,
+      "x-api-version": apiVersion,
+    },
+    mimeType: AUDIO_CONTENT_TYPE,
+  });
+  if (result.status < 200 || result.status >= 300) {
+    throw new Error(`Blob upload failed (${result.status}): ${result.body}`);
+  }
+
+  // 3. Register the uploaded blob so the server records it and transcribes.
+  await apiPost<unknown>(`/api/workouts/${sessionId}/audio-segments`, {
+    chunkId,
+    sequence,
+    blobUrl,
+    durationSeconds,
+    sizeBytes,
+  });
+
+  return blobUrl;
 }

@@ -14,7 +14,27 @@ export async function transcribeAndExtract(sessionId: string): Promise<void> {
   `;
 
   if (transcriptRows.length === 0) {
-    throw new Error(`No transcript segments found for session ${sessionId}`);
+    // Distinguish the causes so the failure isn't opaque: no audio uploaded at
+    // all vs. audio uploaded but transcription never produced anything.
+    const audioRows = await sql`
+      SELECT remote_status, COUNT(*)::int AS n
+      FROM audio_segments
+      WHERE session_id = ${sessionId}
+      GROUP BY remote_status
+    `;
+    if (audioRows.length === 0) {
+      throw new Error(
+        `No audio segments uploaded for session ${sessionId} — the recording never reached the server.`
+      );
+    }
+    const breakdown = audioRows
+      .map((r) => `${r.n} ${r.remote_status}`)
+      .join(", ");
+    throw new Error(
+      `No transcript segments for session ${sessionId}: audio uploaded (${breakdown}) ` +
+        `but transcription produced nothing. Check the transcription logs — usually an ` +
+        `audio format/codec mismatch reaching Groq.`
+    );
   }
 
   // Build transcript text with timestamps for Claude
