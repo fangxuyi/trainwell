@@ -18,6 +18,7 @@ import {
   getSessionById,
   updateSessionStatus,
   saveSyncResult,
+  getUnsyncedSessions,
 } from "../db/sessions";
 
 const POLL_INTERVAL_MS = 5000;
@@ -57,21 +58,35 @@ export async function runSyncWorker(sessionId: string): Promise<void> {
       await runJob(job, () => handleUploadAudioChunk(job));
     }
 
-    // Step 3: trigger extraction
-    await apiPost<unknown>(`/api/workouts/${sessionId}/process`, {});
+    // Step 3: trigger extraction — but first check whether the server already
+    // finished. When the app is killed mid-sync, the server-side pipeline still
+    // completes; on the next run we must NOT re-trigger it (wasteful re-run of
+    // Claude extraction), just pick up the finished result.
+    const initial = await apiGet<{ remoteStatus: string }>(
+      `/api/workouts/${sessionId}/processing-status`
+    );
+    let remoteStatus = initial.remoteStatus;
 
-    // Step 4: poll for completion
-    let remoteStatus = "processing";
-    let attempts = 0;
-    while (attempts < MAX_POLL_ATTEMPTS) {
-      await sleep(POLL_INTERVAL_MS);
-      const status = await apiGet<{ remoteStatus: string }>(
-        `/api/workouts/${sessionId}/processing-status`
-      );
-      remoteStatus = status.remoteStatus;
-      if (remoteStatus === "review_required" || remoteStatus === "finalized") break;
-      if (remoteStatus === "failed") throw new Error("Processing failed on server");
-      attempts++;
+    if (remoteStatus !== "review_required" && remoteStatus !== "finalized") {
+      // Only trigger processing if it hasn't already started. If the server is
+      // already 'processing' (a prior run kicked it off), just poll — re-POSTing
+      // would start a duplicate pipeline run.
+      if (remoteStatus !== "processing") {
+        await apiPost<unknown>(`/api/workouts/${sessionId}/process`, {});
+      }
+
+      // Step 4: poll for completion
+      let attempts = 0;
+      while (attempts < MAX_POLL_ATTEMPTS) {
+        await sleep(POLL_INTERVAL_MS);
+        const status = await apiGet<{ remoteStatus: string }>(
+          `/api/workouts/${sessionId}/processing-status`
+        );
+        remoteStatus = status.remoteStatus;
+        if (remoteStatus === "review_required" || remoteStatus === "finalized") break;
+        if (remoteStatus === "failed") throw new Error("Processing failed on server");
+        attempts++;
+      }
     }
 
     if (remoteStatus !== "review_required" && remoteStatus !== "finalized") {
@@ -114,6 +129,19 @@ export async function retryStalledSessions(): Promise<void> {
   const sessionIds = [...new Set(due.map((j) => j.sessionId))];
   for (const sessionId of sessionIds) {
     runSyncWorker(sessionId).catch(console.error);
+  }
+}
+
+// Reconcile sessions that started syncing but never finished locally — the
+// server may have completed the pipeline while the app was backgrounded or
+// killed. Re-running the sync worker checks the server status and pulls down
+// the finished result (it no longer re-triggers processing if already done).
+// Call this on app foreground. Covers cases retryStalledSessions misses,
+// because those sessions have no pending jobs left to be "due".
+export async function reconcileUnsyncedSessions(): Promise<void> {
+  const sessions = await getUnsyncedSessions();
+  for (const session of sessions) {
+    runSyncWorker(session.id).catch(console.error);
   }
 }
 

@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { AppState } from "react-native";
 import { getDb } from "../src/db/client";
 import * as Notifications from "expo-notifications";
-import { retryStalledSessions } from "../src/sync/worker";
+import { retryStalledSessions, reconcileUnsyncedSessions } from "../src/sync/worker";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -26,6 +26,10 @@ export default function RootLayout() {
     const sub = AppState.addEventListener("change", (state) => {
       if (state === "active") {
         retryStalledSessions().catch(console.error);
+        // Also reconcile sessions the server finished while the app was
+        // backgrounded/killed — these have no due jobs, so the line above
+        // misses them; this pulls down the completed result.
+        reconcileUnsyncedSessions().catch(console.error);
       }
     });
     return () => sub.remove();
