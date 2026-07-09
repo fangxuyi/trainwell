@@ -34,3 +34,7 @@ apps/mobile        Expo React Native app
 apps/api           Next.js API + web portal
 packages/schemas   Shared TypeScript types
 ```
+
+## Docs
+
+Architecture, setup, environment variables, and known gaps — see [TECHNICAL.md](TECHNICAL.md).
