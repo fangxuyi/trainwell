@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "dependencies": {
+    "@clerk/clerk-expo": "^2.19.31",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~56.0.12",
     "expo-audio": "~56.0.12",
@@ -17,6 +18,7 @@
     "expo-sqlite": "~56.0.5",
     "expo-status-bar": "~56.0.4",
     "expo-task-manager": "~56.0.19",
+    "expo-web-browser": "^57.0.0",
     "react": "19.2.3",
     "react-native": "0.85.3"
   },

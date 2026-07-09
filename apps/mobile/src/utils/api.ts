@@ -1,12 +1,23 @@
 import { File } from "expo-file-system";
+import { getAuthToken } from "../auth/token";
 
 const BASE_URL =
   process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
 
+// Builds request headers with the current Clerk session token (if signed in),
+// so the API can identify the user and scope data to them.
+async function authHeaders(extra?: Record<string, string>): Promise<Record<string, string>> {
+  const token = await getAuthToken();
+  return {
+    ...(extra ?? {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: await authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -20,7 +31,10 @@ export async function apiGet<T>(path: string, timeoutMs = 5000): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(`${BASE_URL}${path}`, { signal: controller.signal });
+    const res = await fetch(`${BASE_URL}${path}`, {
+      signal: controller.signal,
+      headers: await authHeaders(),
+    });
     if (!res.ok) throw new Error(`API GET ${path} failed (${res.status})`);
     return res.json() as Promise<T>;
   } finally {
@@ -29,7 +43,10 @@ export async function apiGet<T>(path: string, timeoutMs = 5000): Promise<T> {
 }
 
 export async function apiDelete(path: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}${path}`, { method: "DELETE" });
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: "DELETE",
+    headers: await authHeaders(),
+  });
   if (!res.ok && res.status !== 404) {
     throw new Error(`API DELETE ${path} failed (${res.status})`);
   }
