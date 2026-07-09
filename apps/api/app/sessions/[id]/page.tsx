@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import sql from "@/lib/db";
 import { marked } from "marked";
+import { auth } from "@clerk/nextjs/server";
 import type { ExerciseRecord } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +32,10 @@ export default async function SessionPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const rows = await sql`SELECT * FROM sessions WHERE id = ${id}`;
+  const { userId } = await auth();
+  const rows = await sql`
+    SELECT * FROM sessions WHERE id = ${id} AND user_id = ${userId}
+  `;
   if (rows.length === 0) notFound();
   const s = rows[0];
 
