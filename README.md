@@ -4,8 +4,8 @@ A local-first iOS app that records personal training sessions, transcribes the c
 
 ## What it does
 
-1. **Records** — tap Start and the app records audio in 60-second chunks saved to local SQLite + device storage. The phone stays fully functional offline — recording, pausing, and viewing cached data all work without a network connection.
-2. **Transcribes** — each chunk is uploaded and transcribed by Groq Whisper in the background as the session progresses.
+1. **Records** — tap Start and the app records the session as a single continuous audio file (compressed AAC/`.m4a`) on device, with metadata in local SQLite. Recording keeps running in the background with the screen locked or in another app. The phone stays fully functional offline — recording, pausing, and viewing cached data all work without a network connection.
+2. **Transcribes** — when you end a session, the whole recording uploads directly to Vercel Blob (a presigned upload that bypasses the serverless request-size limit, so any session length works) and is transcribed by Groq Whisper on the server.
 3. **Extracts** — after you stop, Claude reads the full transcript and pulls out exercises, sets, reps, weights, technique cues, and trainer notes into structured data.
 4. **Summarises** — a compact Markdown summary is generated and stored in both Neon and locally.
 5. **Reviews** — a dedicated review screen lets you correct exercise names and set data before finalising.
@@ -13,7 +13,7 @@ A local-first iOS app that records personal training sessions, transcribes the c
 7. **Web portal** — a Next.js dashboard at the deployed Vercel URL for viewing sessions and asking AI questions from a browser.
 8. **Lock screen Live Activity** — while recording, an iOS Live Activity shows the elapsed timer and trainer name on the lock screen and Dynamic Island (requires iOS 16.2+).
 
-Upload and AI processing happen in the background. If connectivity is lost mid-session, sync retries automatically when the app returns to the foreground.
+Upload and AI processing run server-side and finish on their own — you don't need to keep the app open. After you end a session, transcription and extraction complete on the server even if the app is backgrounded or force-closed; the app reconciles the finished result the next time it's foregrounded. If connectivity is lost, sync retries automatically when the app returns to the foreground.
 
 ## Tech stack
 
@@ -110,11 +110,13 @@ These are real gaps in the current implementation — not aspirational:
 
 - **`apiPost` has no timeout**: Only `apiGet` has the 5-second abort timeout. Upload steps in the sync worker can hang indefinitely if the server is unresponsive.
 
-- **No concurrency guard on `retryStalledSessions`**: Rapid app foreground/background cycling can start multiple sync workers for the same session simultaneously.
+- **Continuous recording has no mid-session crash resilience**: The session is recorded as one continuous file — required for reliable background recording, since iOS forbids re-activating the audio session in the background (which the old per-chunk rotation needed). The tradeoff: a hard app crash mid-recording can lose the in-progress file. Offline is unaffected (recording is fully local; the upload queues and retries).
+
+- **No concurrency guard on foreground sync**: On foreground, both `retryStalledSessions` and `reconcileUnsyncedSessions` run, and rapid foreground/background cycling can start multiple sync workers for the same session at once. Re-runs are idempotent (server status is re-checked and processing isn't re-triggered when already done), but it's redundant work.
 
 - **`failed_permanently` jobs have no UI recovery**: After 5 failed attempts, jobs are permanently abandoned. The session detail screen only shows "Retry Sync" when `localStatus === 'local_error'`; a session stuck with permanently-failed jobs shows the syncing indicator forever.
 
-- **Live Activity untested end-to-end**: The config plugin generates correct Swift code and Xcode target wiring, but no EAS build has been run since the plugin was added. Treat as untested until confirmed on device.
+- **Live Activity display unverified**: The config plugin builds cleanly and the widget target signs and installs on device via Xcode, but whether the lock-screen / Dynamic Island Live Activity actually renders during recording hasn't been confirmed. Note: the widget extension needs its own provisioning profile — on a personal Apple team these expire periodically, so if the CLI build can't provision it, build via Xcode (which regenerates it).
 
 - **Web portal is unauthenticated**: All session data is publicly readable at the Vercel URL. Acceptable for a personal single-user app; add auth before sharing the URL.
 

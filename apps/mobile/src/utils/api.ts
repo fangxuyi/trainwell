@@ -56,7 +56,6 @@ export async function uploadAudioChunk(
   }>(`/api/workouts/${sessionId}/audio-upload-url`, {
     sequence,
     contentType: AUDIO_CONTENT_TYPE,
-    chunkId,
   });
 
   // 2. Stream the file from disk directly to Blob. The presigned URL carries
