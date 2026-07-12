@@ -4,6 +4,10 @@ import sql from "@/lib/db";
 import { transcribeAudioUrl } from "@/lib/transcribe";
 
 export const dynamic = "force-dynamic";
+// Transcription runs inline here; give the Groq call headroom for a full-length
+// session (Groq turbo is fast, but the default timeout is too tight). 60s
+// matches the other heavy routes and stays within the plan's function limit.
+export const maxDuration = 60;
 
 export async function GET(
   _req: NextRequest,
