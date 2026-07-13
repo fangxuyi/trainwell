@@ -53,6 +53,12 @@ export async function POST(
       access: "private",
       allowedContentTypes: [contentType],
       maximumSizeInBytes: MAX_UPLOAD_BYTES,
+      // The blob pathname is deterministic (chunk_<seq>.m4a). If an upload is
+      // interrupted after the blob lands but before the client records it, the
+      // retry re-PUTs to the same path — which 400s ("blob already exists")
+      // unless overwrite is allowed. Without this, any interrupted upload fails
+      // permanently after retries.
+      allowOverwrite: true,
     }
   );
 
