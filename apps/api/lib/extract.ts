@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { ExtractionOutput } from "@/lib/types";
+import type { ExtractionOutput, SourcedValue } from "@/lib/types";
 
 let anthropic: Anthropic;
 function getAnthropic() {
@@ -122,6 +122,103 @@ ${OUTPUT_SCHEMA}`,
   parsed.sessionId = sessionId;
 
   return parsed;
+}
+
+// A single Claude call generating a full hour's structured JSON runs close to
+// the token cap (~60-70s of output generation) and blows the serverless
+// timeout. For long sessions we split the transcript into time windows,
+// extract each in parallel (each call is small and fast), and merge — which
+// both fits the timeout and is faster wall-clock.
+const EXTRACTION_WINDOW_SECONDS = 900; // 15 minutes
+
+type WindowSegment = { startSeconds: number; text: string };
+
+function windowTranscript(segs: WindowSegment[]): string {
+  return segs
+    .map((s) => {
+      const m = Math.floor(s.startSeconds / 60);
+      const sec = Math.floor(s.startSeconds % 60);
+      return `[${m}:${sec.toString().padStart(2, "0")}] ${s.text}`;
+    })
+    .join("\n");
+}
+
+export async function extractWorkoutDataWindowed(
+  sessionId: string,
+  segments: WindowSegment[]
+): Promise<ExtractionOutput> {
+  const lastStart = segments.length ? segments[segments.length - 1].startSeconds : 0;
+
+  // Short sessions: a single call, unchanged behaviour.
+  if (segments.length === 0 || lastStart <= EXTRACTION_WINDOW_SECONDS * 1.5) {
+    return extractWorkoutData(sessionId, windowTranscript(segments));
+  }
+
+  // Split into contiguous time windows.
+  const windows: WindowSegment[][] = [];
+  let current: WindowSegment[] = [];
+  let windowStart = segments[0].startSeconds;
+  for (const s of segments) {
+    if (s.startSeconds >= windowStart + EXTRACTION_WINDOW_SECONDS && current.length) {
+      windows.push(current);
+      current = [];
+      windowStart = s.startSeconds;
+    }
+    current.push(s);
+  }
+  if (current.length) windows.push(current);
+
+  const partials = await Promise.all(
+    windows.map((w) => extractWorkoutData(sessionId, windowTranscript(w)))
+  );
+  return mergeExtractions(sessionId, partials);
+}
+
+function uniqueStrings(arr: string[]): string[] {
+  return [...new Set(arr.filter((x) => x && x.trim()))];
+}
+
+function bestSourced(
+  vals: (SourcedValue<number> | undefined)[]
+): SourcedValue<number> | undefined {
+  return vals
+    .filter((v): v is SourcedValue<number> => !!v)
+    .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))[0];
+}
+
+// Merges per-window extractions into one. Exercises are kept (ordered by time,
+// re-sequenced); string lists are concatenated + de-duped; session-level scalar
+// values take the highest-confidence reading. An exercise that straddles a
+// window boundary may appear twice — an acceptable, rare imperfection.
+function mergeExtractions(
+  sessionId: string,
+  partials: ExtractionOutput[]
+): ExtractionOutput {
+  const exercises = partials
+    .flatMap((p) => p.exercises ?? [])
+    .sort((a, b) => (a.startedAtSeconds ?? 0) - (b.startedAtSeconds ?? 0))
+    .map((ex, i) => ({ ...ex, sequenceNumber: i + 1 }));
+
+  const nextExercises = partials.flatMap((p) => p.nextSessionPlan?.exercises ?? []);
+  const nextNotes = uniqueStrings(partials.flatMap((p) => p.nextSessionPlan?.generalNotes ?? []));
+
+  return {
+    sessionId,
+    extractionVersion: EXTRACTION_VERSION,
+    exercises,
+    sessionNotes: uniqueStrings(partials.flatMap((p) => p.sessionNotes ?? [])),
+    techniqueThemes: uniqueStrings(partials.flatMap((p) => p.techniqueThemes ?? [])),
+    accomplishments: uniqueStrings(partials.flatMap((p) => p.accomplishments ?? [])),
+    improvementAreas: uniqueStrings(partials.flatMap((p) => p.improvementAreas ?? [])),
+    painObservations: partials.flatMap((p) => p.painObservations ?? []),
+    nextSessionPlan:
+      nextExercises.length || nextNotes.length
+        ? { exercises: nextExercises, generalNotes: nextNotes, sourceSegmentIds: [] }
+        : undefined,
+    overallDifficulty: bestSourced(partials.map((p) => p.overallDifficulty)),
+    energyLevel: bestSourced(partials.map((p) => p.energyLevel)),
+    openQuestions: uniqueStrings(partials.flatMap((p) => p.openQuestions ?? [])),
+  };
 }
 
 export async function answerWorkoutQuestion(

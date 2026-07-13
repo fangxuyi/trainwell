@@ -1,5 +1,5 @@
 import sql from "./db";
-import { extractWorkoutData } from "./extract";
+import { extractWorkoutData, extractWorkoutDataWindowed } from "./extract";
 import { generateSummaryText } from "./markdown";
 import { embedTexts } from "./voyage";
 import { chunkExtraction } from "./chunks";
@@ -37,13 +37,16 @@ export async function transcribeAndExtract(sessionId: string): Promise<void> {
     );
   }
 
-  // Build transcript text with timestamps for Claude
-  const fullTranscript = transcriptRows
-    .map((s) => `[${formatTime(s.start_seconds as number)}] ${s.text}`)
-    .join("\n");
-
-  // Extract workout data with Claude
-  const extraction = await extractWorkoutData(sessionId, fullTranscript);
+  // Extract workout data with Claude. Long sessions are split into time windows
+  // and extracted in parallel (a single hour-long extraction exceeds the
+  // serverless timeout); short sessions still run as one call.
+  const extraction = await extractWorkoutDataWindowed(
+    sessionId,
+    transcriptRows.map((s) => ({
+      startSeconds: s.start_seconds as number,
+      text: s.text as string,
+    }))
+  );
 
   // Generate compact summary in workout-summary skill format
   const sessionRows = await sql`SELECT * FROM sessions WHERE id = ${sessionId}`;
@@ -103,10 +106,4 @@ async function embedSession(
       VALUES (${randomUUID()}, ${sessionId}, ${chunks[i].chunkType}, ${chunks[i].content}, ${embeddingStr}::vector)
     `;
   }
-}
-
-function formatTime(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
 }
