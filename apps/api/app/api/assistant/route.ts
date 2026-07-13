@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { embedText } from "@/lib/voyage";
 import { answerWorkoutQuestion } from "@/lib/extract";
+import { getUserId, unauthorized } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -9,6 +10,9 @@ export const maxDuration = 30;
 const TOP_K = 8;
 
 export async function POST(req: NextRequest) {
+  const userId = await getUserId();
+  if (!userId) return unauthorized();
+
   const { question } = await req.json();
   if (!question?.trim()) {
     return NextResponse.json({ error: "question is required" }, { status: 400 });
@@ -18,7 +22,7 @@ export async function POST(req: NextRequest) {
   const queryEmbedding = await embedText(question);
   const embeddingStr = `[${queryEmbedding.join(",")}]`;
 
-  // Vector similarity search across all session chunks
+  // Vector similarity search across the user's own session chunks
   const chunks = await sql`
     SELECT
       sc.content,
@@ -30,16 +34,18 @@ export async function POST(req: NextRequest) {
       1 - (sc.embedding <=> ${embeddingStr}::vector) AS similarity
     FROM session_chunks sc
     JOIN sessions s ON s.id = sc.session_id
+    WHERE s.user_id = ${userId}
     ORDER BY sc.embedding <=> ${embeddingStr}::vector
     LIMIT ${TOP_K}
   `;
 
   if (chunks.length === 0) {
-    // Fall back to most recent sessions if no chunks indexed yet
+    // Fall back to the user's most recent sessions if no chunks indexed yet
     const sessions = await sql`
       SELECT id, started_at, markdown_content, exercises, session_notes
       FROM sessions
-      WHERE remote_status IN ('review_required', 'finalized')
+      WHERE user_id = ${userId}
+        AND remote_status IN ('review_required', 'finalized')
       ORDER BY started_at DESC
       LIMIT 5
     `;

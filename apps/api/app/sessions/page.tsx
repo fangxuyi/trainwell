@@ -1,5 +1,6 @@
 import sql from "@/lib/db";
 import Link from "next/link";
+import { auth } from "@clerk/nextjs/server";
 
 export const dynamic = "force-dynamic";
 
@@ -28,11 +29,13 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default async function SessionsPage() {
+  const { userId } = await auth();
   const rows = await sql`
     SELECT id, started_at, ended_at, duration_seconds, workout_type,
            trainer_name, remote_status, overall_difficulty
     FROM sessions
-    WHERE remote_status IN ('finalized', 'review_required', 'processing')
+    WHERE user_id = ${userId}
+      AND remote_status IN ('finalized', 'review_required', 'processing')
     ORDER BY started_at DESC
   `;
 
