@@ -1,15 +1,20 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
 
-// Web portal pages require a signed-in user (unauthenticated → redirect to
-// sign-in). API routes are left to self-enforce: they read the user via
-// getUserId() and return 401 JSON rather than redirecting, so the mobile app
+// Web portal pages require a signed-in user. Unauthenticated visitors are sent
+// to our own /sign-in page — a bare auth.protect() has no sign-in page to
+// redirect to and 404s. API routes are left to self-enforce: they read the user
+// via getUserId() and return 401 JSON rather than redirecting, so the mobile app
 // gets a clean error instead of an HTML redirect. Admin routes (ADMIN_SECRET)
 // don't call getUserId(), so they keep working without a Clerk session.
 const isPortalPage = createRouteMatcher(["/", "/sessions(.*)", "/ask(.*)"]);
 
 export default clerkMiddleware(async (auth, req) => {
   if (isPortalPage(req)) {
-    await auth.protect();
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.redirect(new URL("/sign-in", req.url));
+    }
   }
 });
 
