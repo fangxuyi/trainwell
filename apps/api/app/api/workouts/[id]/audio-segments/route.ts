@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { put } from "@vercel/blob";
 import sql from "@/lib/db";
 import { transcribeAudioUrl } from "@/lib/transcribe";
+import { requireSessionOwner } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 // Transcription runs inline here; give the Groq call headroom for a full-length
@@ -14,6 +15,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+
+  const owner = await requireSessionOwner(id);
+  if (owner instanceof NextResponse) return owner;
+
   const rows = await sql`
     SELECT * FROM audio_segments WHERE session_id = ${id} ORDER BY sequence ASC
   `;
@@ -25,6 +30,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: sessionId } = await params;
+
+  const owner = await requireSessionOwner(sessionId);
+  if (owner instanceof NextResponse) return owner;
 
   // Two upload paths:
   //  - application/json: the phone already uploaded the file directly to Blob

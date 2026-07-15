@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import sql from "@/lib/db";
 import { transcribeAndExtract } from "@/lib/pipeline";
+import { requireSessionOwner } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -10,6 +11,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: sessionId } = await params;
+
+  const owner = await requireSessionOwner(sessionId);
+  if (owner instanceof NextResponse) return owner;
 
   const sessions = await sql`SELECT * FROM sessions WHERE id = ${sessionId}`;
   if (sessions.length === 0) {
