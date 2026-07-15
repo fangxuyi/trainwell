@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { requireSessionOwner } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +9,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: sessionId } = await params;
+
+  const owner = await requireSessionOwner(sessionId);
+  if (owner instanceof NextResponse) return owner;
 
   const rows = await sql`SELECT * FROM sessions WHERE id = ${sessionId}`;
   if (rows.length === 0) {

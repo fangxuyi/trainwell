@@ -4,6 +4,7 @@ import {
   presignUrl,
   parseStoreIdFromDelegationToken,
 } from "@vercel/blob";
+import { requireSessionOwner } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: sessionId } = await params;
+
+  const owner = await requireSessionOwner(sessionId);
+  if (owner instanceof NextResponse) return owner;
 
   const body = (await req.json().catch(() => ({}))) as {
     sequence?: number;

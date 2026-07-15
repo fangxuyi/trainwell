@@ -4,6 +4,7 @@ import { embedTexts } from "@/lib/voyage";
 import { chunkExtraction, chunkMarkdown } from "@/lib/chunks";
 import type { ExtractionOutput } from "@/lib/types";
 import { randomUUID } from "crypto";
+import { requireSessionOwner } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -13,6 +14,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+
+  const owner = await requireSessionOwner(id);
+  if (owner instanceof NextResponse) return owner;
 
   const rows = await sql`SELECT * FROM sessions WHERE id = ${id}`;
   if (rows.length === 0) {
