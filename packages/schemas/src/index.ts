@@ -6,6 +6,7 @@ export type LocalStatus =
   | "draft"
   | "recording"
   | "paused"
+  | "interrupted"
   | "locally_complete"
   | "awaiting_upload"
   | "syncing"
@@ -71,7 +72,7 @@ export interface AudioSegment {
   durationSeconds: number;
   sizeBytes: number;
   sha256?: string;
-  localStatus: "recording" | "stored" | "deleted";
+  localStatus: "recording" | "interrupted" | "stored" | "deleted";
   remoteStatus: "pending" | "uploading" | "uploaded" | "failed" | "deleted";
   remoteUrl?: string;
   createdAt: string;

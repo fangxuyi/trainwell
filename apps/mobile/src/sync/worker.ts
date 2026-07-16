@@ -44,7 +44,8 @@ async function runSyncWorkerInternal(sessionId: string): Promise<void> {
   if (
     sessionCheck.localStatus === "draft" ||
     sessionCheck.localStatus === "recording" ||
-    sessionCheck.localStatus === "paused"
+    sessionCheck.localStatus === "paused" ||
+    sessionCheck.localStatus === "interrupted"
   ) {
     return;
   }

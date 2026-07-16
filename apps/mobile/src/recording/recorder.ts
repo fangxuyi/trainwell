@@ -33,6 +33,7 @@ const NOTIFICATION_REFRESH_MS = 15_000;
 // format.
 const RECORDING_OPTIONS = {
   ...RecordingPresets.HIGH_QUALITY, // .m4a / MPEG4AAC base
+  directory: "document" as const,
   sampleRate: 16000,
   numberOfChannels: 1,
   bitRate: 24000,
@@ -46,7 +47,9 @@ class WorkoutRecorder {
   private startTime: number = 0;
   private elapsedAtPause: number = 0;
   private onChunkSaved?: (segmentId: string) => void;
+  private onProgress?: (elapsedSeconds: number) => void;
   private onError?: (err: Error) => void;
+  private segmentId: string | null = null;
   private savedSegmentCount = 0;
   private isPaused = false;
 
@@ -70,15 +73,18 @@ class WorkoutRecorder {
     sessionId: string,
     callbacks: {
       onChunkSaved?: (segmentId: string) => void;
+      onProgress?: (elapsedSeconds: number) => void;
       onError?: (err: Error) => void;
     } = {}
   ): Promise<void> {
     this.sessionId = sessionId;
     this.onChunkSaved = callbacks.onChunkSaved;
+    this.onProgress = callbacks.onProgress;
     this.onError = callbacks.onError;
     this.elapsedAtPause = 0;
     this.startTime = 0;
     this.savedSegmentCount = 0;
+    this.segmentId = null;
     this.isPaused = false;
 
     await setAudioModeAsync({
@@ -93,6 +99,16 @@ class WorkoutRecorder {
     // Pass options here (not only to the constructor) so the format is actually
     // applied — see RECORDING_OPTIONS above.
     await recorder.prepareToRecordAsync(RECORDING_OPTIONS as any);
+    const recordingUri = recorder.uri;
+    if (!recordingUri) {
+      throw new Error("Recorder did not provide a persistent file URI.");
+    }
+    const segment = await createAudioSegment({
+      sessionId,
+      sequence: 0,
+      localPath: recordingUri,
+    });
+    this.segmentId = segment.id;
     recorder.record();
     this.recorder = recorder;
     this.startTime = Date.now();
@@ -107,6 +123,7 @@ class WorkoutRecorder {
     this.isPaused = true;
     this.stopHeartbeat();
     this.recorder.pause();
+    this.onProgress?.(this.elapsedAtPause);
   }
 
   async resume(): Promise<void> {
@@ -126,6 +143,7 @@ class WorkoutRecorder {
       await this.persistRecording(recorder);
     }
     this.sessionId = null;
+    this.segmentId = null;
     this.isPaused = false;
     await dismissRecordingNotification();
   }
@@ -150,7 +168,9 @@ class WorkoutRecorder {
   private startHeartbeat(): void {
     this.stopHeartbeat();
     this.heartbeat = setInterval(() => {
-      updateRecordingNotification(this.getElapsedSeconds()).catch(() => {});
+      const elapsedSeconds = this.getElapsedSeconds();
+      updateRecordingNotification(elapsedSeconds).catch(() => {});
+      this.onProgress?.(elapsedSeconds);
     }, NOTIFICATION_REFRESH_MS);
   }
 
@@ -182,20 +202,24 @@ class WorkoutRecorder {
     srcFile.move(destFile);
 
     const sizeBytes = destFile.size ?? 0;
+    let segmentId = this.segmentId;
+    if (!segmentId) {
+      const segment = await createAudioSegment({
+        sessionId,
+        sequence: 0,
+        localPath: destFile.uri,
+      });
+      segmentId = segment.id;
+    }
 
-    const segment = await createAudioSegment({
-      sessionId,
-      sequence: 0,
+    await finalizeAudioSegment(segmentId, {
       localPath: destFile.uri,
-    });
-
-    await finalizeAudioSegment(segment.id, {
       durationSeconds: this.getElapsedSeconds(),
       sizeBytes,
     });
 
     this.savedSegmentCount = 1;
-    this.onChunkSaved?.(segment.id);
+    this.onChunkSaved?.(segmentId);
   }
 }
 

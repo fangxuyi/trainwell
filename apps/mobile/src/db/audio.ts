@@ -42,6 +42,7 @@ export async function createAudioSegment(params: {
 export async function finalizeAudioSegment(
   id: string,
   params: {
+    localPath: string;
     durationSeconds: number;
     sizeBytes: number;
     sha256?: string;
@@ -50,10 +51,44 @@ export async function finalizeAudioSegment(
   const db = await getDb();
   await db.runAsync(
     `UPDATE audio_segments
-     SET local_status = 'stored', duration_seconds = ?,
+     SET local_path = ?, local_status = 'stored', duration_seconds = ?,
          size_bytes = ?, sha256 = ?, updated_at = ?
      WHERE id = ?`,
-    [params.durationSeconds, params.sizeBytes, params.sha256 ?? null, now(), id]
+    [
+      params.localPath,
+      params.durationSeconds,
+      params.sizeBytes,
+      params.sha256 ?? null,
+      now(),
+      id,
+    ]
+  );
+}
+
+export async function markSegmentInterrupted(
+  id: string,
+  localPath: string,
+  sizeBytes: number
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE audio_segments
+     SET local_path = ?, local_status = 'interrupted', size_bytes = ?, updated_at = ?
+     WHERE id = ?`,
+    [localPath, sizeBytes, now(), id]
+  );
+}
+
+export async function markInterruptedSegmentStored(
+  id: string,
+  sizeBytes: number
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE audio_segments
+     SET local_status = 'stored', size_bytes = ?, updated_at = ?
+     WHERE id = ?`,
+    [sizeBytes, now(), id]
   );
 }
 
