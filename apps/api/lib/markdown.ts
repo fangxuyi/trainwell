@@ -17,63 +17,112 @@ interface SessionRow {
   audio_retention_policy: string;
 }
 
-function fmtTime(secs: number): string {
-  const m = Math.floor(secs / 60);
-  const s = Math.floor(secs % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
+function fmtTotalDuration(secs: number): string {
+  const totalSeconds = Math.max(0, Math.round(secs));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds
+      .toString()
+      .padStart(2, "0")}`;
+  }
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function fmtExerciseDuration(seconds: number, isCombined: boolean): string {
+  if (seconds < 30) return `~${Math.max(1, Math.round(seconds))} sec`;
+
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  return `~${minutes} min${isCombined ? " total" : ""}`;
+}
+
+function fmtSetVolume(sets: ExerciseSet[]): string | null {
+  if (sets.length === 0) return null;
+
+  const reps = sets.map((set) => set.completedReps).filter((reps): reps is number => reps != null);
+  const setLabel = `${sets.length} set${sets.length === 1 ? "" : "s"}`;
+  if (reps.length === 0) return setLabel;
+
+  const repValues = [...new Set(reps)];
+  const repsText = repValues.length === 1 ? String(repValues[0]) : reps.join("/");
+  return `${setLabel} × ${repsText} reps`;
+}
+
+function fmtWeights(sets: ExerciseSet[]): string | null {
+  const weights = sets
+    .map((set) => set.weight)
+    .filter((weight): weight is NonNullable<ExerciseSet["weight"]> => !!weight)
+    .map((weight) => `${weight.value} ${weight.unit}`);
+
+  if (weights.length === 0) return null;
+  const values = [...new Set(weights)];
+  return `@ ${values.join("/")}`;
+}
+
+function bestCoachNote(exercises: ExerciseRecord[]): string | null {
+  for (const exercise of exercises) {
+    const note = exercise.techniqueNotes[0]?.text ?? exercise.trainerNotes[0]?.text;
+    if (note) return note;
+  }
+  return null;
 }
 
 export function generateSummaryText(
   session: SessionRow,
   extraction: ExtractionOutput
 ): string {
-  const date = new Date(session.started_at).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  const date = new Date(session.started_at).toISOString().slice(0, 10);
+  const completed = extraction.exercises.filter((exercise) => exercise.completed);
+  const lines: string[] = [`WorkoutSummary ${date}`];
+  const inferredDuration = completed.reduce(
+    (latestEnd, exercise) => Math.max(latestEnd, exercise.endedAtSeconds ?? 0),
+    0
+  );
+  const totalDuration = session.duration_seconds ?? inferredDuration;
+  const completedExerciseCount = new Set(
+    completed.map((exercise) => exercise.canonicalName.trim().toLocaleLowerCase())
+  ).size;
 
-  const lines: string[] = [`Workout Summary for ${date}`, ""];
-
-  const completed = extraction.exercises.filter((e) => e.completed);
+  if (totalDuration > 0) {
+    lines.push(`Total length: ${fmtTotalDuration(totalDuration)}`);
+  }
+  lines.push(`Exercises completed: ${completedExerciseCount}`, "");
 
   if (completed.length === 0) {
     lines.push("No exercises recorded.");
     return lines.join("\n");
   }
 
-  completed.forEach((ex, idx) => {
-    const timeRange =
-      ex.startedAtSeconds != null && ex.endedAtSeconds != null
-        ? `, ${fmtTime(ex.startedAtSeconds)}-${fmtTime(ex.endedAtSeconds)}`
-        : "";
+  const grouped = new Map<string, ExerciseRecord[]>();
+  for (const exercise of completed) {
+    const key = exercise.canonicalName.trim().toLocaleLowerCase();
+    const existing = grouped.get(key) ?? [];
+    existing.push(exercise);
+    grouped.set(key, existing);
+  }
 
-    const completedSets = ex.sets.filter((s) => s.completed);
-    const totalSets = completedSets.length;
-    const firstSet = completedSets[0];
-    let volume = "";
-    if (totalSets > 0) {
-      volume += `, ${totalSets} set${totalSets !== 1 ? "s" : ""}`;
-      const reps = firstSet?.completedReps;
-      if (reps != null) volume += ` × ${reps} reps`;
-      const w = firstSet?.weight;
-      if (w) volume += ` @ ${w.value}${w.unit}`;
-    }
+  [...grouped.values()].forEach((exercises, index) => {
+    const first = exercises[0];
+    const sets = exercises.flatMap((exercise) => exercise.sets.filter((set) => set.completed));
+    const durationSeconds = exercises.reduce((total, exercise) => {
+      if (exercise.startedAtSeconds == null || exercise.endedAtSeconds == null) return total;
+      return total + Math.max(0, exercise.endedAtSeconds - exercise.startedAtSeconds);
+    }, 0);
+    const details = [
+      durationSeconds > 0 ? fmtExerciseDuration(durationSeconds, exercises.length > 1) : null,
+      fmtSetVolume(sets),
+      fmtWeights(sets),
+    ].filter((detail): detail is string => !!detail);
 
-    lines.push(`${idx + 1}. ${ex.canonicalName}${timeRange}${volume}`);
+    lines.push(`${index + 1}. ${first.canonicalName}${details.length ? `, ${details.join(", ")}` : ""}`);
 
-    const cue =
-      ex.techniqueNotes[0]?.text ??
-      ex.trainerNotes[0]?.text ??
-      ex.userNotes[0]?.text;
+    const cue = bestCoachNote(exercises);
     if (cue) lines.push(`- ${cue}`);
 
     lines.push("");
   });
-
-  if (extraction.sessionNotes.length > 0) {
-    lines.push(`Note: ${extraction.sessionNotes[0]}`);
-  }
 
   return lines.join("\n").trim();
 }
