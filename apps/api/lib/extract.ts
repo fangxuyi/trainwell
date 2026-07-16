@@ -22,6 +22,9 @@ Rules:
 - Record pain/discomfort observations without diagnosis
 - Each transcript line starts with [mm:ss] — use these to estimate startedAtSeconds and endedAtSeconds for each exercise (convert mm:ss to total seconds). These are approximate — your best estimate is better than null.
 - The transcript may include Chinese or English speech mixed together.
+- Use a clear, conventional canonicalName when the exercise is identifiable, while retaining trainer-spoken wording in spokenNames. Do not force a guess when the movement is unclear.
+- Capture completed set-by-set reps and weights when stated. Use approximate/weakly_inferred values only when the transcript supports them.
+- Keep techniqueNotes and trainerNotes to personalized corrections, safety modifications, progression/regression guidance, or repeated emphasis. Omit generic exercise instructions that do not add session-specific value.
 
 Return ONLY valid JSON matching the ExtractionOutput schema.`;
 
