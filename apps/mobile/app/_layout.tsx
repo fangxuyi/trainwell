@@ -1,6 +1,6 @@
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { AppState, View, ActivityIndicator } from "react-native";
 import { ClerkProvider, useAuth } from "@clerk/clerk-expo";
 import { getDb } from "../src/db/client";
@@ -9,6 +9,9 @@ import { retryStalledSessions, reconcileUnsyncedSessions } from "../src/sync/wor
 import { tokenCache } from "../src/auth/tokenCache";
 import { setTokenGetter } from "../src/auth/token";
 import { configureRevenueCat } from "../src/billing/revenueCat";
+import { colors } from "../src/ui/theme";
+import { claimLegacySessions } from "../src/db/sessions";
+import { setCurrentUserId } from "../src/auth/currentUser";
 
 const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
 
@@ -22,21 +25,37 @@ Notifications.setNotificationHandler({
 });
 
 const screenOptions = {
-  headerStyle: { backgroundColor: "#0F172A" },
-  headerTintColor: "#F8FAFC",
-  headerTitleStyle: { fontWeight: "700" as const },
-  contentStyle: { backgroundColor: "#0F172A" },
+  headerStyle: { backgroundColor: colors.background },
+  headerTintColor: colors.text,
+  headerTitleStyle: { fontWeight: "800" as const },
+  headerShadowVisible: false,
+  contentStyle: { backgroundColor: colors.background },
 };
 
 function RootNavigator() {
   const { isLoaded, isSignedIn, getToken, userId } = useAuth();
   const segments = useSegments();
   const router = useRouter();
+  const [preparedUserId, setPreparedUserId] = useState<string | null>(null);
 
   // Expose Clerk's token to the non-React api layer.
   useEffect(() => {
     setTokenGetter(isSignedIn ? getToken : null);
   }, [isSignedIn, getToken]);
+
+  useEffect(() => {
+    setCurrentUserId(userId ?? null);
+    if (!userId) {
+      setPreparedUserId(null);
+      return;
+    }
+    claimLegacySessions(userId)
+      .then(() => setPreparedUserId(userId))
+      .catch((error) => {
+        console.error("Failed to prepare local account data", error);
+        setPreparedUserId(userId);
+      });
+  }, [userId]);
 
   useEffect(() => {
     if (isSignedIn && userId) configureRevenueCat(userId).catch(console.error);
@@ -67,7 +86,7 @@ function RootNavigator() {
     }
   }, [isLoaded, isSignedIn, segments]);
 
-  if (!isLoaded) {
+  if (!isLoaded || (isSignedIn && preparedUserId !== userId)) {
     return (
       <View style={{ flex: 1, backgroundColor: "#0F172A", alignItems: "center", justifyContent: "center" }}>
         <ActivityIndicator size="large" color="#38BDF8" />
@@ -79,7 +98,7 @@ function RootNavigator() {
     <Stack screenOptions={screenOptions}>
       <Stack.Screen name="sign-in" options={{ headerShown: false }} />
       <Stack.Screen name="sign-up" options={{ headerShown: false }} />
-      <Stack.Screen name="index" options={{ title: "Trainwell" }} />
+      <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen
         name="session/new"
         options={{ title: "New Workout", presentation: "modal" }}
