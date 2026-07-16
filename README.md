@@ -1,41 +1,75 @@
 # Trainwell
 
-A local-first iOS app that records personal training sessions, transcribes the conversation, extracts structured workout data, and lets you ask AI questions about your training history.
+Trainwell turns a recorded personal-training session into a useful workout history. Record while you train, then get a structured recap of exercises, sets, weights, coaching cues, accomplishments, discomfort notes, and ideas for the next session.
 
-## What it does
+The iPhone app is the primary experience. A companion web portal lets you revisit sessions, ask questions about your history, and manage credits from a browser.
 
-1. **Records** — the session is captured as a single continuous audio file on device, and recording keeps running in the background with the screen locked or in another app. Works fully offline.
-2. **Transcribes** — when you end a session, the recording uploads to the cloud and is transcribed by Groq Whisper.
-3. **Extracts** — Claude reads the transcript and pulls out exercises, sets, reps, weights, technique cues, and trainer notes.
-4. **Summarises** — a compact Markdown summary is generated and stored.
-5. **Reviews** — a review screen lets you correct exercise and set data before finalising.
-6. **Ask AI** — ask natural-language questions across your whole training history (retrieval-augmented over past sessions).
-7. **Web portal** — a browser dashboard for viewing sessions and asking questions.
-8. **Lock screen Live Activity** — a recording timer on the lock screen and Dynamic Island (iOS 16.2+).
+## From workout to workout history
 
-Transcription and AI processing run server-side and finish on their own — you don't need to keep the app open. The app reconciles results the next time it's foregrounded.
+1. **Sign in and start a workout** — choose the workout type, optionally add your trainer and goal, and begin recording.
+2. **Train without babysitting the app** — recording continues as one session while the phone is locked or another app is open. You can pause, resume, and add timestamped notes.
+3. **End the session safely** — Trainwell saves the recording on the phone first. If you are offline, it waits and retries when you reconnect.
+4. **Receive an AI workout recap** — the recording is transcribed and converted into exercises, completed sets, reps, weights, trainer cues, session themes, accomplishments, discomfort observations, and a next-session plan.
+5. **Review before finalizing** — correct exercise names, reps, or weights instead of treating AI output as unquestionable.
+6. **Build on your history** — browse past workouts or ask questions such as “How has my squat changed?” and “What cues did my trainer give me?”
 
-## Tech stack
+## Features
 
-| Layer | Technology |
+### Record naturally
+
+- Continuous workout recording, including background recording on iOS.
+- Pause and resume controls, elapsed time, audio activity, and quick notes.
+- Lock-screen recording status, with Live Activity and Dynamic Island integration awaiting final device confirmation on supported iPhones.
+- Local-first storage, so a connection is not required while you train.
+- Local audio-retention choices for keeping recordings or deleting them after processing or review.
+
+### Get a structured workout recap
+
+- Exercise names, sets, reps, weights, equipment, and approximate exercise timing.
+- Personalized trainer cues and technique themes.
+- Accomplishments, improvement areas, pain or discomfort observations, and next-session suggestions.
+- Context-aware processing for long sessions so exercises crossing an AI processing boundary are less likely to be lost or counted twice.
+- Exercise-name normalization against a pinned public exercise dataset when a confident match exists.
+
+### Review and learn over time
+
+- Recent sessions and full workout history on mobile.
+- Editable extracted exercise names, reps, and weights before finalization.
+- Ask AI across prior sessions using only the signed-in user’s workout history.
+- Authenticated web portal for viewing session details and asking workout-history questions.
+
+### Manage your account and credits
+
+- Account menu showing the signed-in name and email, available credits, membership status, and account-switching controls.
+- 100 non-expiring starter credits for every user.
+- One credit covers each started minute of transcription.
+- Web purchases through Stripe:
+  - 100 non-expiring credits for **$5**.
+  - 300 credits per month for **$6.99/month**.
+  - 800 credits per month for **$15.99/month**.
+- Monthly credits reset each billing period and do not roll over; permanent credits remain until used.
+
+## Mobile and web
+
+| Experience | Best for |
 |---|---|
-| Mobile | Expo / React Native (expo-audio, expo-router, expo-sqlite) |
-| API & web | Next.js on Vercel |
-| Database | Neon (Postgres + pgvector) |
-| Transcription | Groq Whisper |
-| AI extraction & Q&A | Claude (Anthropic) |
-| Embeddings | Voyage AI |
-| Audio storage | Vercel Blob |
-| Billing | RevenueCat + StoreKit (iOS), Stripe Checkout (web) |
+| **iPhone app** | Recording workouts, reviewing summaries, browsing history, checking credits, and asking AI questions. |
+| **Web portal** | Reviewing sessions on a larger screen, asking questions, purchasing credits, and managing a Stripe subscription. |
 
-## Layout
+Mobile App Store billing is implemented through RevenueCat but is not yet live because the App Store Connect products and Apple Developer release setup are still pending. Until that setup is complete, purchases are available through the Stripe-powered web portal.
 
-```
-apps/mobile        Expo React Native app
-apps/api           Next.js API + web portal
-packages/schemas   Shared TypeScript types
-```
+## Privacy and reliability
 
-## Docs
+- Access to workout, account, and credit data requires Clerk authentication.
+- Server data and locally cached mobile sessions are scoped to the signed-in user.
+- Recordings are committed to on-device storage before upload work begins.
+- Upload and processing work is retryable, and the server can finish processing while the app is closed.
+- Ask AI retrieves context only from the current user’s workout history.
 
-Architecture, setup, environment variables, and known gaps — see [TECHNICAL.md](TECHNICAL.md).
+Trainwell is a training log and reflection tool, not a medical diagnostic service. Pain and discomfort mentioned during a workout are recorded as observations, not diagnoses.
+
+## Project status
+
+Trainwell is under active development and currently focuses on iOS. Core recording, transcription, structured summaries, history, authenticated web access, AI questions, credits, and Stripe billing are implemented. Mobile App Store purchases and several recovery and synchronization edge cases remain release work.
+
+For architecture, setup, environment variables, validation commands, and known limitations, see [TECHNICAL.md](TECHNICAL.md).

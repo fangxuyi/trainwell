@@ -1,168 +1,316 @@
-# Trainwell — Technical Reference
+# Trainwell Technical Reference
 
-Architecture, setup, and operational detail. For a high-level overview see [README.md](README.md).
+This document describes the current implementation, operational setup, and known limitations. For the product overview, see [README.md](README.md).
 
-## Architecture
+## System overview
 
-### Recording (mobile)
+Trainwell is a TypeScript monorepo with three primary workspaces:
 
-A session is recorded as a **single continuous audio file**, not per-chunk. This is required for reliable background recording: iOS forbids a backgrounded app from *re-activating* the audio session, so an earlier design that rotated to a new recorder every 60 seconds threw `CannotInterruptOthers` at the first rotation once the app was backgrounded. One recorder, activated once in the foreground, keeps running with the screen locked (needs `UIBackgroundModes: ["audio"]`).
-
-- Format: compressed AAC / `.m4a`, mono, 16 kHz — Groq-friendly and small (~16 MB for a 90-minute session).
-- **expo-audio gotcha:** recording options are only applied when passed to `prepareToRecordAsync(options)`. The option-flattening shim lives on that method, not the constructor — passing options only to `new AudioModule.AudioRecorder(...)` silently records a default container.
-- Tradeoff: no mid-session crash resilience — a hard crash mid-recording can lose the in-progress file (see Known gaps).
-
-### Upload (mobile → Vercel Blob)
-
-On session end, the whole file uploads **directly to Vercel Blob** via a presigned PUT, bypassing Vercel's 4.5 MB serverless request-body limit.
-
-- The server mints the presigned URL with `issueSignedToken` + `presignUrl` (`@vercel/blob`). The `@vercel/blob/client` SDK can't run in React Native (needs Node `crypto`/`crypto.subtle`), so the phone does a plain `PUT` with `expo-file-system`'s `File.upload()` — which runs on a native background URLSession, so the transfer survives the app being suspended.
-- The phone then registers the blob URL with the API, which stores the `audio_segments` row and kicks off transcription.
-
-### Transcription & extraction (server)
-
-- **Groq Whisper** (`whisper-large-v3-turbo`) transcribes the uploaded audio. Groq caps files at 25 MB; an explicit size check surfaces a clear error before the request (overridable via `GROQ_MAX_AUDIO_BYTES`).
-- **Claude** reads the transcript and extracts exercises, sets, reps, weights, technique cues, and trainer notes, then the server generates a compact Markdown summary. Long transcripts use 15-minute primary windows with 90 seconds of context from adjacent windows; context clarifies exercises crossing a boundary but is explicitly excluded from extracted evidence to prevent loss and double-counting. Runs via Next.js `after()` so the request returns fast while the pipeline finishes in the background.
-
-### Sync model
-
-Sync is **server-driven with client reconciliation**:
-
-- On end, the client creates the remote session, uploads, then calls `/process` (which triggers the server-side pipeline). The pipeline completes on its own — **the app does not need to stay open.**
-- The app **reconciles on foreground**: `reconcileUnsyncedSessions()` re-runs the sync worker for any session that started syncing but isn't synchronized, pulling down whatever the server finished. `runSyncWorker` checks server status first and skips re-processing if already done.
-- If connectivity is lost, jobs retry with backoff (`retryStalledSessions()` on foreground).
-
-### Credits and billing
-
-Every Clerk user receives 100 non-expiring credits on first access. A session reserves `ceil(durationSeconds / 60)` credits before any audio upload, using monthly credits before permanent credits. The reservation is consumed after transcript rows are stored and refunded if transcription fails. An insufficient balance returns HTTP 402; mobile marks the sync job blocked and keeps the recording locally until the user buys credits and retries.
-
-Postgres is the source of truth for balances, reservations, transactions, and idempotent billing events. Monthly allowances reset rather than roll over:
-
-- 100 permanent credits: $5 one-time.
-- 300 monthly credits: $6.99/month.
-- 800 monthly credits: $15.99/month.
-
-iOS purchases use StoreKit through RevenueCat. Configure the three products in App Store Connect, attach them to the current RevenueCat offering, use the Clerk user ID as RevenueCat's App User ID, and send RevenueCat webhooks to `/api/billing/revenuecat/webhook` with the configured Authorization header. This requires a development build; purchases do not run in Expo Go.
-
-Web purchases use Stripe-hosted Checkout. Create one one-time Price and two recurring monthly Prices, configure their IDs in the API environment, and send `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `invoice.paid`, and `customer.subscription.deleted` events to `/api/billing/stripe/webhook`. Enable Stripe's customer portal for cancellation and payment-method management, but disable plan switching there; users must cancel an active plan before choosing another. Webhook fulfillment, not the browser redirect, grants credits.
-
-### Ask AI (RAG)
-
-Questions are embedded with **Voyage AI** (`voyage-3-lite`, 512 dims) and matched to the most relevant session chunks via pgvector cosine search before being answered by Claude.
-
-## Monorepo layout
-
-```
-apps/
-  mobile/          Expo React Native app
-  api/             Next.js API + web portal (deployed to Vercel)
-packages/
-  schemas/         Shared TypeScript types (WorkoutSession, SyncJob, etc.)
+```text
+apps/mobile        Expo / React Native iOS app
+apps/api           Next.js API and authenticated web portal on Vercel
+packages/schemas   Shared domain and API types
 ```
 
-## Running locally
+The mobile app is local-first. User actions and recording metadata are committed to SQLite before network work. A persistent job queue creates the server session, uploads audio directly to Vercel Blob, waits for processing, and saves the result back to SQLite.
 
-### API
+The API stores authoritative remote session, transcript, embedding, credit, and billing data in Neon Postgres. Clerk provides identity for both mobile bearer tokens and web sessions. Session routes verify that the current Clerk user owns the requested session.
+
+## Primary execution flow
+
+```text
+User starts workout
+  -> mobile creates a Clerk-user-scoped SQLite session
+  -> one continuous AAC/M4A recording starts
+  -> user may pause, resume, or add local timestamped notes
+
+User ends workout
+  -> recorder finalizes the local file
+  -> mobile stores one audio_segments row
+  -> persistent sync jobs are enqueued
+  -> server session creation reserves credits
+  -> mobile requests a presigned Blob PUT URL
+  -> native file upload sends audio directly to Vercel Blob
+  -> mobile registers the Blob URL with the API
+  -> API transcribes the audio and stores transcript segments
+  -> mobile requests processing
+  -> server extracts, canonicalizes, summarizes, and embeds the workout
+  -> mobile polls or later reconciles the completed result
+  -> user reviews and finalizes locally
+```
+
+## Mobile application
+
+### Navigation and identity
+
+Expo Router defines sign-in, sign-up, home, recording, session detail, review, history, Ask AI, and credits routes under `apps/mobile/app`.
+
+`apps/mobile/app/_layout.tsx` mounts Clerk, provides bearer tokens to the non-React API client, redirects based on authentication state, initializes RevenueCat, and runs sync recovery when the app returns to the foreground.
+
+The home-screen account drawer uses Clerk profile data and shows the server credit balance and membership state. Signing out returns to the sign-in flow. SQLite session reads and due sync jobs are filtered by the active Clerk user so switching accounts does not reveal another account’s cached sessions. Legacy rows with `user_id = 'local'` are claimed by the first signed-in user after the upgrade.
+
+### Local data model
+
+SQLite runs in WAL mode and contains:
+
+- `sessions` — workout metadata, status, extracted data, summaries, and the owning Clerk user ID.
+- `audio_segments` — local recording path and upload state. The current recorder creates one segment per session.
+- `transcript_segments` — available in the schema but server transcripts are not currently synchronized into this local table.
+- `quick_notes` — timestamped notes captured during recording; currently local only.
+- `sync_jobs` — persistent network work with retries and backoff.
+
+Shared application types use camelCase. SQLite and Postgres rows use snake_case, with explicit conversions in database and API boundaries.
+
+### Recording
+
+A session is recorded as one continuous compressed AAC `.m4a` file: mono, 16 kHz, 24 kbps CBR. At this bitrate a 90-minute session is approximately 16 MB.
+
+The single-file design is an iOS reliability constraint. iOS cannot reliably reactivate a recording audio session after the app is backgrounded, so rotating recorders in the background causes `CannotInterruptOthers`. The recorder is prepared once in the foreground and remains active while the screen is locked or another app is open.
+
+Recording options must be passed to `prepareToRecordAsync(RECORDING_OPTIONS)`. Passing them only to the `expo-audio` recorder constructor can silently use an unintended native container.
+
+The Live Activity integration is generated by `apps/mobile/plugins/withLiveActivity.js`. Do not edit generated iOS output directly; update the plugin and regenerate the native project.
+
+### Sync and reconciliation
+
+The sync worker in `apps/mobile/src/sync/worker.ts` performs these steps:
+
+1. Create the remote session idempotently.
+2. Upload stored audio in sequence.
+3. Check remote processing status before triggering processing.
+4. Poll until the server reaches `review_required` or `finalized`.
+5. Fetch the remote result and cache it in SQLite.
+
+Network jobs use stable client-generated IDs and persistent SQLite rows. Retry delays are 5 seconds, 15 seconds, 1 minute, 5 minutes, and 15 minutes. HTTP 402 marks a job blocked so the local recording remains available after the user runs out of credits.
+
+On foreground, `retryStalledSessions()` retries due jobs and `reconcileUnsyncedSessions()` checks sessions whose server work may have completed while mobile was suspended. Processing is not re-triggered when the server already reports `processing`, `review_required`, or `finalized`.
+
+## API and web portal
+
+### Authentication and ownership
+
+Clerk protects the web portal routes: middleware covers the main session and Ask AI pages, while the credits page performs its own server-side sign-in check. API routes return JSON 401 responses rather than browser redirects so mobile receives predictable errors. Collection routes query by `user_id`; session-specific routes call `requireSessionOwner()` and return 404 for sessions the current user does not own. Admin migration routes use `ADMIN_SECRET`, and billing webhooks use provider signatures or shared authorization instead of Clerk.
+
+The portal currently provides authenticated session history, session detail, Ask AI, credit balance, Stripe checkout, customer-portal access, and Clerk account controls.
+
+### Audio upload and transcription
+
+Full recordings never pass through a Next.js request body. The API issues a presigned PUT URL, and `expo-file-system` uploads the local file directly to private Vercel Blob storage. The deterministic Blob path allows overwrite so an interrupted upload can safely retry.
+
+After upload, mobile registers the Blob URL through `/api/workouts/[id]/audio-segments`. That request transcribes the audio inline with Groq `whisper-large-v3-turbo`, using verbose JSON segment timestamps, and stores `transcript_segments` in Postgres.
+
+Groq’s default per-file guard is 25 MB and can be changed with `GROQ_MAX_AUDIO_BYTES`. Legacy CAF/LPCM files can be converted to WAV server-side; unsupported CAF codecs fail with a clear error.
+
+### Workout extraction and summary generation
+
+Processing is triggered through `/api/workouts/[id]/process`. The route marks the session `processing`, returns immediately, and uses Next.js `after()` to continue the pipeline within the Vercel function lifetime.
+
+The pipeline makes the following model/service calls:
+
+1. **Transcription:** one Groq Whisper call for the current single audio file.
+2. **Structured extraction:** one Claude Sonnet call for shorter sessions. Long sessions are divided into approximately 15-minute primary windows and extracted with parallel Claude calls.
+3. **Boundary protection:** each long-session window receives up to 90 seconds of adjacent context. The prompt allows that context to identify continuity but explicitly prohibits extracting evidence from it, reducing lost or duplicated sets at boundaries.
+4. **Exercise canonicalization:** no LLM call. Extracted names are deterministically matched against a commit-pinned public GitHub exercise dataset. Low-confidence or ambiguous matches preserve Claude’s original name. Dataset failures are non-fatal.
+5. **Summary:** no additional LLM call. `generateSummaryText()` deterministically formats the merged structured extraction into the compact workout recap.
+6. **Indexing:** one Voyage AI embeddings request batches the generated overview, exercise, and next-plan chunks for pgvector retrieval.
+
+Model output is parsed as untrusted JSON. The current parser handles JSON inside or outside Markdown code fences, but runtime schema validation is still limited; malformed structures can fail the pipeline.
+
+### Ask AI
+
+Ask AI uses retrieval-augmented generation:
+
+1. Voyage `voyage-3-lite` embeds the question into a 512-dimensional vector.
+2. Postgres/pgvector selects the eight closest chunks belonging to the signed-in user.
+3. Claude Sonnet answers from that retrieved context and is instructed not to add unsupported facts.
+
+If no embeddings exist, the route falls back to the five most recent completed session summaries. The response type includes citations, but the current implementation returns an empty citation array and puts any session references in the answer text.
+
+## Credits and billing
+
+Postgres is the source of truth for balances, reservations, transactions, and idempotent billing events.
+
+- A credit account is created on first access with 100 permanent credits.
+- Required credits are `max(1, ceil(durationSeconds / 60))`.
+- Credits are reserved before upload, consumed after transcript rows are stored, and refunded when transcription fails.
+- Subscription credits are used before permanent credits.
+- Monthly allowances reset to the plan amount each paid period; unused monthly credits do not roll over.
+- Insufficient balance returns HTTP 402 and blocks the mobile sync job without deleting local audio.
+
+Products currently defined in `apps/api/lib/billing.ts`:
+
+| Product | Allowance | Price | Billing |
+|---|---:|---:|---|
+| Credit pack | 100 permanent credits | $5 | One time |
+| Monthly 300 | 300 credits per period | $6.99/month | Subscription |
+| Monthly 800 | 800 credits per period | $15.99/month | Subscription |
+
+Web purchases use Stripe Checkout. Webhook events grant credits; the checkout redirect never grants value. Stripe’s customer portal handles cancellation and payment methods.
+
+iOS purchases use StoreKit through RevenueCat, with the Clerk user ID as the RevenueCat App User ID. The code and webhook route are present, but mobile purchasing is not production-ready until Apple Developer membership, App Store Connect products, RevenueCat offerings, and release credentials are configured. Purchases require a development or release build and do not work in Expo Go.
+
+## Server data
+
+The base Postgres schema is in `apps/api/lib/schema.sql`. Core tables include:
+
+- `sessions`, `audio_segments`, and `transcript_segments`.
+- `session_chunks` with pgvector embeddings.
+- `credit_accounts`, `credit_reservations`, and `credit_transactions`.
+- `billing_events` for webhook idempotency.
+
+The mobile SQLite representation and shared types must remain compatible with these server rows when persisted session fields change.
+
+## Local development
+
+### Prerequisites
+
+- Node.js and npm.
+- Xcode for iOS development.
+- A Neon Postgres database and Vercel Blob store.
+- Clerk, Groq, Anthropic, and Voyage credentials.
+- Stripe credentials for web billing.
+- Apple Developer, App Store Connect, and RevenueCat credentials only when enabling iOS purchases or distribution.
+
+### Install
+
+From the repository root:
 
 ```bash
-cd apps/api
-cp .env.example .env   # fill in DATABASE_URL, GROQ_API_KEY, ANTHROPIC_API_KEY,
-                       # BLOB_READ_WRITE_TOKEN, VOYAGE_API_KEY, ADMIN_SECRET
 npm install
-npm run dev
 ```
 
-### Mobile
+### Run the API and web portal
+
+```bash
+cp apps/api/.env.example apps/api/.env
+npm run api
+```
+
+The Next.js development server is available at `http://localhost:3000` by default.
+
+### Run the mobile app
+
+```bash
+cp apps/mobile/.env.example apps/mobile/.env
+npm run mobile
+```
+
+For native iOS features such as recording, Live Activities, and RevenueCat, use a development build:
 
 ```bash
 cd apps/mobile
-cp .env.example .env   # set EXPO_PUBLIC_API_URL=http://localhost:3000
-npm install
-npx expo run:ios       # requires Xcode + Apple Developer account for device builds
+npx expo run:ios
 ```
 
-For a standalone (no-Metro) build on a device, use `--configuration Release`. If the CLI can't provision the Live Activity widget extension (personal Apple teams' extension profiles expire ~weekly), open `ios/Trainwell.xcworkspace` in Xcode and build/run from there — Xcode regenerates the profile.
+Expo Go is insufficient for the complete app because it cannot load the custom native Live Activity and RevenueCat integration.
 
-### EAS build (TestFlight)
+For a standalone device build, use a Release configuration. If command-line provisioning cannot sign the widget extension, open `apps/mobile/ios/Trainwell.xcworkspace` in Xcode and let Xcode manage the profiles.
+
+### EAS preview build
 
 ```bash
 cd apps/mobile
 eas build --platform ios --profile preview
 ```
 
-The Live Activity widget extension is added during `expo prebuild` by `plugins/withLiveActivity.js` — no manual Xcode changes needed.
+## Database initialization and migrations
 
-## Database setup
+Initialize a new database with `apps/api/lib/schema.sql`, deploy the API, then call the idempotent migration route after schema-feature additions:
 
-After initializing the base tables from `apps/api/lib/schema.sql`, run this endpoint and re-run it after deploying schema additions:
-
-```
-POST /api/admin/migrate
-Content-Type: application/json
-
-{"secret":"<ADMIN_SECRET>"}
+```bash
+curl -X POST https://your-api.example/api/admin/migrate \
+  -H 'Content-Type: application/json' \
+  -d '{"secret":"YOUR_ADMIN_SECRET"}'
 ```
 
-Creates the RAG and credit-system additions: embedding, credit-ledger, reservation, transaction, and billing-event tables plus the `vector` extension, database credit functions, and IVFFlat index.
+The migration creates pgvector, embedding tables and indexes, credit and billing tables, and the credit ledger functions.
 
-After sessions exist, backfill embeddings:
+To index sessions that existed before embeddings were introduced:
 
-```
-POST /api/admin/backfill-embeddings
-Authorization: Bearer <ADMIN_SECRET>
+```bash
+curl -X POST https://your-api.example/api/admin/backfill-embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"secret":"YOUR_ADMIN_SECRET"}'
 ```
 
 ## Environment variables
 
-| Variable | Where | Purpose |
-|---|---|---|
-| `DATABASE_URL` | API | Neon connection string |
-| `GROQ_API_KEY` | API | Whisper transcription |
-| `ANTHROPIC_API_KEY` | API | Claude extraction + Q&A |
-| `VOYAGE_API_KEY` | API | Session chunk embeddings |
-| `BLOB_READ_WRITE_TOKEN` | API | Vercel Blob audio storage |
-| `ADMIN_SECRET` | API | Protects `/api/admin/*` routes |
-| `GROQ_MAX_AUDIO_BYTES` | API | Optional — override the 25 MB Groq file-size guard |
-| `EXERCISE_DATASET_URL` | API | Optional — override the pinned exercise-name reference dataset |
-| `EXPO_PUBLIC_API_URL` | Mobile | Points mobile at the API |
-| `STRIPE_SECRET_KEY` | API | Creates Stripe Checkout and customer-portal sessions |
-| `STRIPE_WEBHOOK_SECRET` | API | Verifies Stripe webhook signatures |
-| `STRIPE_CREDITS_100_PRICE_ID` | API | Stripe one-time 100-credit Price |
-| `STRIPE_MONTHLY_300_PRICE_ID` | API | Stripe recurring 300-credit Price |
-| `STRIPE_MONTHLY_800_PRICE_ID` | API | Stripe recurring 800-credit Price |
-| `REVENUECAT_WEBHOOK_AUTHORIZATION` | API | Shared Authorization header for RevenueCat webhooks |
-| `REVENUECAT_CREDITS_100_PRODUCT_ID` | API | Optional RevenueCat one-time product override |
-| `REVENUECAT_MONTHLY_300_PRODUCT_ID` | API | Optional RevenueCat 300-credit product override |
-| `REVENUECAT_MONTHLY_800_PRODUCT_ID` | API | Optional RevenueCat 800-credit product override |
-| `EXPO_PUBLIC_REVENUECAT_IOS_API_KEY` | Mobile | RevenueCat public iOS SDK key |
+### API and web
 
-## Known gaps
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | Neon Postgres connection string. |
+| `GROQ_API_KEY` | Groq Whisper transcription. |
+| `ANTHROPIC_API_KEY` | Claude extraction and Ask AI answers. |
+| `VOYAGE_API_KEY` | Session and question embeddings. |
+| `BLOB_READ_WRITE_TOKEN` | Private Vercel Blob access and presigned uploads. |
+| `ADMIN_SECRET` | Protects database migration and backfill routes. |
+| `GROQ_MAX_AUDIO_BYTES` | Optional transcription file-size guard override. |
+| `EXERCISE_DATASET_URL` | Optional override for the pinned exercise reference dataset. |
+| `NEXT_PUBLIC_API_URL` | Public deployed API URL exposed to the web client where needed. |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk public browser key. |
+| `CLERK_SECRET_KEY` | Clerk server key. |
+| `STRIPE_SECRET_KEY` | Creates Stripe Checkout and customer portal sessions. |
+| `STRIPE_WEBHOOK_SECRET` | Verifies Stripe webhook signatures. |
+| `STRIPE_CREDITS_100_PRICE_ID` | Stripe one-time credit-pack Price ID. |
+| `STRIPE_MONTHLY_300_PRICE_ID` | Stripe 300-credit subscription Price ID. |
+| `STRIPE_MONTHLY_800_PRICE_ID` | Stripe 800-credit subscription Price ID. |
+| `REVENUECAT_WEBHOOK_AUTHORIZATION` | Exact shared Authorization header expected from RevenueCat. |
+| `REVENUECAT_CREDITS_100_PRODUCT_ID` | Optional one-time RevenueCat product override. |
+| `REVENUECAT_MONTHLY_300_PRODUCT_ID` | Optional 300-credit product override. |
+| `REVENUECAT_MONTHLY_800_PRODUCT_ID` | Optional 800-credit product override. |
 
-Real gaps in the current implementation — not aspirational:
+### Mobile
 
-- **Continuous recording has no mid-session crash resilience**: recording as one file is required for reliable background recording (iOS forbids re-activating the audio session in the background). The tradeoff is that a hard app crash mid-recording can lose the in-progress file. Offline is unaffected — recording is fully local; the upload queues and retries.
+| Variable | Purpose |
+|---|---|
+| `EXPO_PUBLIC_API_URL` | API base URL used by mobile. |
+| `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk public mobile key. |
+| `EXPO_PUBLIC_REVENUECAT_IOS_API_KEY` | RevenueCat public iOS SDK key; omit until mobile billing is configured. |
 
-- **`running` sync jobs not recovered on restart**: if the app crashes while a job is `running`, `getDueJobs()` never picks it up (it only queries `pending` and `retry_wait`). Workaround: retry from the session detail screen.
+Never commit local `.env` files or server secrets.
 
-- **`local_only` processing mode produces no content**: audio is recorded and stored, but there is no on-device transcription/extraction pipeline. Sessions stay `locally_complete` with no summary.
+## Validation
 
-- **Review edits not pushed to server**: exercise edits and local finalization (`remote_status = 'finalized'`) are saved to SQLite only; the server still reflects the original extraction. There is no `PATCH /api/workouts/:id` route.
+There is currently no repository-owned automated test suite. Run the checks relevant to the changed code:
 
-- **`apiPost` has no timeout**: only `apiGet` has the 5-second abort. Upload steps in the sync worker can hang if the server is unresponsive.
+```bash
+npm run typecheck
+npm run lint --workspace=apps/api
+npm run build --workspace=apps/api
+cd apps/mobile && npx tsc --noEmit
+```
 
-- **No concurrency guard on foreground sync**: on foreground, both `retryStalledSessions` and `reconcileUnsyncedSessions` run; rapid foreground/background cycling can start multiple sync workers for the same session. Re-runs are idempotent (server status re-checked, processing not re-triggered when done), but it's redundant work.
+Recording, background sync, upload, Live Activity, and RevenueCat changes require validation on a development or release build when a device is available.
 
-- **`failed_permanently` jobs have no UI recovery**: after 5 failed attempts, jobs are abandoned. The session detail screen only shows "Retry Sync" when `localStatus === 'local_error'`, so a session with permanently-failed jobs can show the syncing indicator indefinitely.
+## Important implementation constraints
 
-- **Live Activity display unverified**: the config plugin builds cleanly and the widget target signs/installs on device, but whether the lock-screen / Dynamic Island Live Activity actually renders during recording hasn't been confirmed.
+- Commit mobile state to SQLite before starting network work.
+- Keep sync jobs persistent, retryable, idempotent, and based on stable client IDs.
+- Keep one continuous recording file per session; do not restore recorder rotation.
+- Upload full recordings directly to Blob using presigned PUT URLs.
+- Authenticate every API route and verify ownership on session-specific routes.
+- Treat model output as untrusted and preserve user corrections.
+- Keep shared types, SQLite rows, and Postgres rows compatible.
+- Change Live Activity native output through `apps/mobile/plugins/withLiveActivity.js`.
 
-- **Web portal is unauthenticated**: all session data is publicly readable at the Vercel URL. Acceptable for a personal single-user app; add auth before sharing.
+## Known limitations
 
-## Roadmap
+- **Hard-crash recording loss:** one continuous file is required for background reliability, but a hard app crash before recorder finalization can lose the in-progress file.
+- **Running sync jobs are not reset after restart:** `getDueJobs()` selects `pending` and `retry_wait`, not jobs left in `running` by a crash.
+- **Manual upload is not actually manual:** the UI exposes `manual_upload`, but the active-session hook currently queues and starts sync for every mode except `local_only`.
+- **Local-only sessions have no generated content:** there is no on-device transcription or extraction pipeline.
+- **Quick notes are local only:** timestamped notes are not uploaded or included in server extraction.
+- **Review edits do not sync to Postgres:** exercise corrections and finalization update SQLite only; there is no server PATCH flow.
+- **Permanent sync failures lack a true reset path:** retrying does not reset `failed_permanently` jobs to a runnable state.
+- **POST and DELETE calls have no timeout:** only the mobile GET helper currently uses an abort timeout.
+- **Foreground sync has no concurrency lock:** rapid app-state changes can start redundant workers, although server operations are designed to be idempotent.
+- **Extraction validation is incomplete:** malformed or structurally incomplete Claude JSON can still fail downstream processing.
+- **Window merge can retain rare duplicates:** adjacent context prevents double-counting from context evidence, but independently extracted primary windows can still identify one boundary-spanning exercise twice.
+- **Ask AI citations are incomplete:** answers may name sessions in prose, but the structured `citations` array is empty.
+- **Live Activity display still needs confirmed device QA.**
+- **iOS billing is deferred:** StoreKit products, RevenueCat offerings, and Apple release credentials are not configured for production.
 
-- Fix the `running`-job recovery gap (reset to `retry_wait` on app start)
-- Push review edits and finalization to the server (`PATCH /api/workouts/:id`)
-- Add a timeout to `apiPost` / `uploadAudioChunk`
-- Verify Live Activity on device
-- Speaker diarisation (distinguish trainer vs client voice)
-- Export to CSV / Apple Health
+## Reference artifacts
+
+`recordings/`, `sources-markdown/`, `summary-markdown/`, and `summary-html/` are reference artifacts. Do not overwrite them unless a task explicitly requires it.
