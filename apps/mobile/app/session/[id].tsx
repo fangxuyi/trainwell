@@ -12,7 +12,10 @@ import { useCallback, useRef, useState } from "react";
 import type { WorkoutSession } from "@trainwell/schemas";
 import { getSessionById, deleteSession, listSessions } from "../../src/db/sessions";
 import { apiDelete } from "../../src/utils/api";
-import { retrySessionSync } from "../../src/sync/recovery";
+import {
+  processInterruptedRecording,
+  retrySessionSync,
+} from "../../src/sync/recovery";
 import { getAudioSegmentsBySession } from "../../src/db/audio";
 import { getNotesBySession } from "../../src/db/quickNotes";
 import { formatDuration } from "../../src/utils/time";
@@ -29,6 +32,7 @@ export default function SessionDetailScreen() {
   const [noteCount, setNoteCount] = useState(0);
   const [prevId, setPrevId] = useState<string | null>(null);
   const [nextId, setNextId] = useState<string | null>(null);
+  const [recovering, setRecovering] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadAll = useCallback(async () => {
@@ -127,6 +131,7 @@ export default function SessionDetailScreen() {
     finalized: "#34D399",
     recording: "#EF4444",
     paused: "#F59E0B",
+    interrupted: "#F59E0B",
     draft: "#64748B",
     local_error: "#EF4444",
   };
@@ -213,6 +218,35 @@ export default function SessionDetailScreen() {
               ? "Uploading and processing your session..."
               : "Preparing to sync..."}
           </Text>
+        </View>
+      )}
+
+      {session.localStatus === "interrupted" && (
+        <View style={styles.interruptedCard}>
+          <Text style={styles.interruptedTitle}>Recording interrupted</Text>
+          <Text style={styles.interruptedText}>
+            Trainwell preserved any audio left after the app closed unexpectedly. The file may be
+            incomplete, so it will never upload unless you explicitly try processing it.
+          </Text>
+          <TouchableOpacity
+            style={[styles.retryButton, recovering && styles.retryButtonDisabled]}
+            disabled={recovering}
+            onPress={async () => {
+              setRecovering(true);
+              try {
+                await processInterruptedRecording(id);
+              } catch (error) {
+                Alert.alert("Recovery failed", (error as Error).message);
+              } finally {
+                await loadAll();
+                setRecovering(false);
+              }
+            }}
+          >
+            <Text style={styles.retryButtonText}>
+              {recovering ? "Trying saved audio..." : "Try Processing Saved Audio"}
+            </Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -362,6 +396,16 @@ const styles = StyleSheet.create({
     borderColor: "#1E4080",
   },
   syncingText: { color: "#38BDF8", fontSize: 14, flex: 1 },
+  interruptedCard: {
+    backgroundColor: "#3A2A0C",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#92400E",
+    padding: 16,
+    marginBottom: 12,
+  },
+  interruptedTitle: { color: "#FBBF24", fontSize: 16, fontWeight: "700" },
+  interruptedText: { color: "#FDE68A", fontSize: 14, lineHeight: 20, marginTop: 8, marginBottom: 14 },
   cardTitle: {
     color: "#94A3B8",
     fontSize: 11,
@@ -435,6 +479,7 @@ const styles = StyleSheet.create({
     padding: 10,
     alignItems: "center",
   },
+  retryButtonDisabled: { opacity: 0.55 },
   retryButtonText: { color: "#FCA5A5", fontSize: 14, fontWeight: "600" },
   navRow: {
     flexDirection: "row",

@@ -98,6 +98,11 @@ export function useActiveSession(): ActiveSession {
               );
             }
           },
+          onProgress: (elapsedSeconds) => {
+            updateSessionStatus(newSession.id, {
+              durationSeconds: Math.round(elapsedSeconds),
+            }).catch(console.error);
+          },
           onError: (err) => {
             setError(err.message);
             setState("error");

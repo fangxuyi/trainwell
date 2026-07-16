@@ -1,5 +1,9 @@
 import { Directory, File, Paths } from "expo-file-system";
-import { getAudioSegmentsBySession, markSegmentDeleted } from "../db/audio";
+import {
+  getAudioSegmentsBySession,
+  markSegmentDeleted,
+  markSegmentInterrupted,
+} from "../db/audio";
 import { getDb } from "../db/client";
 
 const sessionsDirectory = new Directory(Paths.document, "sessions");
@@ -59,6 +63,72 @@ export async function cleanupOrphanedAudioFiles(): Promise<number> {
   }
 
   return deletedCount;
+}
+
+export async function recoverInterruptedRecordingFiles(): Promise<number> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{
+    session_id: string;
+    segment_id: string | null;
+    local_path: string | null;
+  }>(
+    `SELECT s.id AS session_id, a.id AS segment_id, a.local_path
+     FROM sessions s
+     LEFT JOIN audio_segments a ON a.session_id = s.id AND a.sequence = 0
+     WHERE s.local_status IN ('recording', 'paused')`
+  );
+  let recoveredCount = 0;
+
+  for (const row of rows) {
+    const sessionDirectory = new Directory(sessionsDirectory, row.session_id);
+    const audioDirectory = new Directory(sessionDirectory, "audio");
+    if (!audioDirectory.exists) audioDirectory.create({ intermediates: true });
+
+    const destination = new File(audioDirectory, "interrupted_recording.m4a");
+    const source = row.local_path ? new File(row.local_path) : null;
+    let recoveredFile: File | null = destination.exists ? destination : null;
+
+    if (source?.exists && source.uri !== destination.uri) {
+      if (destination.exists) {
+        const keepSource = (source.size ?? 0) > (destination.size ?? 0);
+        if (keepSource) {
+          destination.delete();
+          source.move(destination);
+        } else {
+          source.delete();
+        }
+      } else {
+        source.move(destination);
+      }
+      recoveredFile = destination;
+    } else if (source?.exists) {
+      recoveredFile = source;
+    }
+
+    const interruptedPath = recoveredFile?.uri ?? row.local_path;
+    if (row.segment_id && interruptedPath) {
+      await markSegmentInterrupted(
+        row.segment_id,
+        interruptedPath,
+        recoveredFile?.size ?? 0
+      );
+      if (recoveredFile?.exists && (recoveredFile.size ?? 0) > 0) {
+        recoveredCount++;
+      }
+    }
+
+    const ts = new Date().toISOString();
+    await db.runAsync(
+      `UPDATE sessions
+       SET local_status = 'interrupted', ended_at = COALESCE(ended_at, ?),
+           sync_status = 'local_only', updated_at = ?,
+           local_version = local_version + 1
+       WHERE id = ?`,
+      [ts, ts, row.session_id]
+    );
+  }
+
+  return recoveredCount;
 }
 
 function removeEmptyAudioDirectories(sessionId: string): void {

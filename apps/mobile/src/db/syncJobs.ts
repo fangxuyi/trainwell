@@ -42,6 +42,24 @@ export async function enqueueJob(
   return getJobById(id) as Promise<SyncJob>;
 }
 
+export async function ensureJob(
+  sessionId: string,
+  type: SyncJobType,
+  payloadReference?: string
+): Promise<SyncJob> {
+  const db = await getDb();
+  const existing = await db.getFirstAsync<Record<string, unknown>>(
+    `SELECT * FROM sync_jobs
+     WHERE session_id = ? AND type = ?
+       AND COALESCE(payload_reference, '') = COALESCE(?, '')
+     ORDER BY created_at ASC LIMIT 1`,
+    [sessionId, type, payloadReference ?? null]
+  );
+  return existing
+    ? rowToJob(existing)
+    : enqueueJob(sessionId, type, payloadReference);
+}
+
 export async function getJobById(id: string): Promise<SyncJob | null> {
   const db = await getDb();
   const row = await db.getFirstAsync<Record<string, unknown>>(

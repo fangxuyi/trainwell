@@ -14,7 +14,6 @@ import { useFocusEffect, useRouter } from "expo-router";
 import {
   getIncompleteSession,
   listSessions,
-  updateSessionStatus,
   upsertSessionsFromServer,
 } from "../src/db/sessions";
 import { recorder } from "../src/recording/recorder";
@@ -31,6 +30,9 @@ function greeting(): string {
 }
 
 function statusPresentation(session: WorkoutSession): { label: string; color: string } {
+  if (session.localStatus === "interrupted") {
+    return { label: "Recording interrupted", color: colors.warning };
+  }
   if (session.localStatus === "local_error" || session.remoteStatus === "failed") {
     return { label: "Needs attention", color: colors.danger };
   }
@@ -60,11 +62,6 @@ export default function HomeScreen() {
 
       const load = async () => {
         setLoading(true);
-        if (!recorder.isActive()) {
-          const stale = await getIncompleteSession();
-          if (stale) await updateSessionStatus(stale.id, { localStatus: "locally_complete" });
-        }
-
         const [localSessions, incomplete] = await Promise.all([
           listSessions(20),
           recorder.isActive() ? getIncompleteSession() : Promise.resolve(null),

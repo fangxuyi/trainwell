@@ -65,9 +65,11 @@ Shared application types use camelCase. SQLite and Postgres rows use snake_case,
 
 ### Recording
 
-A session is recorded as one continuous compressed AAC `.m4a` file: mono, 16 kHz, 24 kbps CBR. At this bitrate a 90-minute session is approximately 16 MB.
+A session is recorded as one continuous compressed AAC `.m4a` file: mono, 16 kHz, 24 kbps CBR. At this bitrate a 90-minute session is approximately 16 MB. The recorder writes into the private app Documents directory, and its native URI is registered in `audio_segments` before capture begins. A normal stop moves the finalized file into `sessions/<session-id>/audio/recording.m4a`.
 
 The single-file design is an iOS reliability constraint. iOS cannot reliably reactivate a recording audio session after the app is backgrounded, so rotating recorders in the background causes `CannotInterruptOthers`. The recorder is prepared once in the foreground and remains active while the screen is locked or another app is open.
+
+If the process terminates during recording, startup recovery changes the session to `interrupted` and moves any surviving native file to `sessions/<session-id>/audio/interrupted_recording.m4a`. Interrupted files never upload automatically because an abruptly terminated M4A container may be incomplete. The session detail screen explains the interruption and lets the user explicitly try server processing; failed recovery keeps the local file available for deletion or another attempt.
 
 Recording options must be passed to `prepareToRecordAsync(RECORDING_OPTIONS)`. Passing them only to the `expo-audio` recorder constructor can silently use an unintended native container.
 
@@ -306,7 +308,7 @@ Recording, background sync, upload, Live Activity, and RevenueCat changes requir
 
 ## Known limitations
 
-- **Hard-crash recording loss:** one continuous file is required for background reliability, but a hard app crash before recorder finalization can lose the in-progress file.
+- **Interrupted audio may be unusable:** force-quit recovery preserves any surviving recording file, but iOS may terminate before the M4A container is finalized. The app cannot guarantee that an interrupted file will play or transcribe successfully.
 - **Manual upload is not actually manual:** the UI exposes `manual_upload`, but the active-session hook currently queues and starts sync for every mode except `local_only`.
 - **Local-only sessions have no generated content:** there is no on-device transcription or extraction pipeline.
 - **Quick notes are local only:** timestamped notes are not uploaded or included in server extraction.

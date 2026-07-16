@@ -39,6 +39,7 @@ function RootNavigator() {
   const segments = useSegments();
   const router = useRouter();
   const [preparedUserId, setPreparedUserId] = useState<string | null>(null);
+  const [localRecoveryReady, setLocalRecoveryReady] = useState(false);
 
   // Expose Clerk's token to the non-React api layer.
   useEffect(() => {
@@ -64,7 +65,10 @@ function RootNavigator() {
   }, [isSignedIn, userId]);
 
   useEffect(() => {
-    getDb().then(prepareLocalRecovery).catch(console.error);
+    getDb()
+      .then(prepareLocalRecovery)
+      .catch(console.error)
+      .finally(() => setLocalRecoveryReady(true));
   }, []);
 
   useEffect(() => {
@@ -109,7 +113,7 @@ function RootNavigator() {
     }
   }, [isLoaded, isSignedIn, segments]);
 
-  if (!isLoaded || (isSignedIn && preparedUserId !== userId)) {
+  if (!isLoaded || !localRecoveryReady || (isSignedIn && preparedUserId !== userId)) {
     return (
       <View style={{ flex: 1, backgroundColor: "#0F172A", alignItems: "center", justifyContent: "center" }}>
         <ActivityIndicator size="large" color="#38BDF8" />
