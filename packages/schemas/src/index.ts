@@ -270,6 +270,14 @@ export interface QuickNote {
 
 // ─── API types ───────────────────────────────────────────────────────────────
 
+export interface CreditBalance {
+  totalCredits: number;
+  permanentCredits: number;
+  subscriptionCredits: number;
+  subscriptionTier: string | null;
+  subscriptionPeriodEnd: string | null;
+}
+
 export interface CreateSessionRequest {
   id: string;
   workoutType?: string;

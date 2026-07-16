@@ -5,6 +5,7 @@ import {
   getDueJobs,
   markJobRunning,
   markJobCompleted,
+  markJobBlocked,
   markJobFailed,
 } from "../db/syncJobs";
 import {
@@ -13,7 +14,7 @@ import {
   markSegmentUploaded,
   markSegmentDeleted,
 } from "../db/audio";
-import { apiPost, apiGet, uploadAudioChunk } from "../utils/api";
+import { ApiError, apiPost, apiGet, uploadAudioChunk } from "../utils/api";
 import {
   getSessionById,
   updateSessionStatus,
@@ -115,8 +116,9 @@ export async function runSyncWorker(sessionId: string): Promise<void> {
     // If so, the session is locally complete but waiting for the next
     // attempt — don't mark it as a permanent error.
     const retryable = await getPendingJobsBySession(sessionId);
+    const blocked = retryable.some((job) => job.status === "blocked");
     await updateSessionStatus(sessionId, {
-      localStatus: retryable.length > 0 ? "locally_complete" : "local_error",
+      localStatus: blocked || retryable.length === 0 ? "local_error" : "locally_complete",
       syncStatus: "failed",
     });
   }
@@ -151,6 +153,10 @@ async function runJob(job: SyncJob, handler: () => Promise<void>): Promise<void>
     await handler();
     await markJobCompleted(job.id);
   } catch (err) {
+    if (err instanceof ApiError && err.status === 402) {
+      await markJobBlocked(job.id, err.message);
+      throw err;
+    }
     await markJobFailed(job.id, (err as Error).message, job.attemptCount + 1);
     throw err;
   }

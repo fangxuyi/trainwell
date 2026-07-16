@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { getUserId, unauthorized } from "@/lib/auth";
+import {
+  InsufficientCreditsError,
+  reserveCreditsForSession,
+} from "@/lib/credits";
 
 export const dynamic = "force-dynamic";
 
@@ -41,12 +45,32 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Idempotent: if the user already created this session, return it
+  // Idempotent: if the user already created this session, ensure its credit
+  // reservation still exists before allowing upload retries.
   const existing = await sql`
     SELECT * FROM sessions WHERE id = ${id} AND user_id = ${userId}
   `;
   if (existing.length > 0) {
-    return NextResponse.json(existing[0], { status: 200 });
+    try {
+      await reserveCreditsForSession(
+        userId,
+        id,
+        Number(existing[0].duration_seconds ?? durationSeconds ?? 0)
+      );
+      return NextResponse.json(existing[0], { status: 200 });
+    } catch (error) {
+      if (error instanceof InsufficientCreditsError) {
+        return NextResponse.json(
+          {
+            error: "insufficient_credits",
+            requiredCredits: error.requiredCredits,
+            balance: error.balance,
+          },
+          { status: 402 }
+        );
+      }
+      throw error;
+    }
   }
 
   const rows = await sql`
@@ -62,5 +86,20 @@ export async function POST(req: NextRequest) {
     ) RETURNING *
   `;
 
-  return NextResponse.json(rows[0], { status: 201 });
+  try {
+    await reserveCreditsForSession(userId, id, Number(durationSeconds ?? 0));
+    return NextResponse.json(rows[0], { status: 201 });
+  } catch (error) {
+    if (error instanceof InsufficientCreditsError) {
+      return NextResponse.json(
+        {
+          error: "insufficient_credits",
+          requiredCredits: error.requiredCredits,
+          balance: error.balance,
+        },
+        { status: 402 }
+      );
+    }
+    throw error;
+  }
 }

@@ -21,6 +21,7 @@ export default function HomeScreen() {
   const [incompleteSession, setIncompleteSession] =
     useState<WorkoutSession | null>(null);
   const [loading, setLoading] = useState(true);
+  const [credits, setCredits] = useState<number | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -51,6 +52,9 @@ export default function HomeScreen() {
             setSessions(refreshed.filter((s) => s.localStatus !== "recording" && s.localStatus !== "paused"))
           )
           .catch(() => {}); // ignore if offline or slow
+        apiGet<{ totalCredits: number }>("/api/credits")
+          .then((value) => setCredits(value.totalCredits))
+          .catch(() => {});
       };
       load();
     }, [])
@@ -109,6 +113,13 @@ export default function HomeScreen() {
           <Text style={styles.askButtonText}>Ask AI</Text>
         </TouchableOpacity>
       </View>
+
+      <TouchableOpacity style={styles.creditButton} onPress={() => router.push("/credits")}>
+        <Text style={styles.creditButtonText}>
+          {credits === null ? "Credits" : `${credits} credits available`}
+        </Text>
+        <Text style={styles.creditArrow}>Buy →</Text>
+      </TouchableOpacity>
 
       <Text style={styles.sectionTitle}>Recent Sessions</Text>
 
@@ -185,6 +196,16 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     marginBottom: 12,
   },
+  creditButton: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    backgroundColor: "#172554",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 24,
+  },
+  creditButtonText: { color: "#BFDBFE", fontWeight: "600" },
+  creditArrow: { color: "#38BDF8", fontWeight: "700" },
   sessionCard: {
     backgroundColor: "#1E293B",
     borderRadius: 12,

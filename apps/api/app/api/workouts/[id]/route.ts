@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { getUserId, unauthorized } from "@/lib/auth";
+import { refundSessionCredits } from "@/lib/credits";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,13 @@ export async function DELETE(
   if (!userId) return unauthorized();
 
   const { id } = await params;
+  const rows = await sql`
+    SELECT id FROM sessions WHERE id = ${id} AND user_id = ${userId}
+  `;
+  if (rows.length === 0) {
+    return new NextResponse(null, { status: 204 });
+  }
+  await refundSessionCredits(id);
   await sql`DELETE FROM sessions WHERE id = ${id} AND user_id = ${userId}`;
   return new NextResponse(null, { status: 204 });
 }

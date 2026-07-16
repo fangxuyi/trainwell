@@ -32,6 +32,20 @@ Sync is **server-driven with client reconciliation**:
 - The app **reconciles on foreground**: `reconcileUnsyncedSessions()` re-runs the sync worker for any session that started syncing but isn't synchronized, pulling down whatever the server finished. `runSyncWorker` checks server status first and skips re-processing if already done.
 - If connectivity is lost, jobs retry with backoff (`retryStalledSessions()` on foreground).
 
+### Credits and billing
+
+Every Clerk user receives 100 non-expiring credits on first access. A session reserves `ceil(durationSeconds / 60)` credits before any audio upload, using monthly credits before permanent credits. The reservation is consumed after transcript rows are stored and refunded if transcription fails. An insufficient balance returns HTTP 402; mobile marks the sync job blocked and keeps the recording locally until the user buys credits and retries.
+
+Postgres is the source of truth for balances, reservations, transactions, and idempotent billing events. Monthly allowances reset rather than roll over:
+
+- 100 permanent credits: $5 one-time.
+- 300 monthly credits: $6.99/month.
+- 800 monthly credits: $15.99/month.
+
+iOS purchases use StoreKit through RevenueCat. Configure the three products in App Store Connect, attach them to the current RevenueCat offering, use the Clerk user ID as RevenueCat's App User ID, and send RevenueCat webhooks to `/api/billing/revenuecat/webhook` with the configured Authorization header. This requires a development build; purchases do not run in Expo Go.
+
+Web purchases use Stripe-hosted Checkout. Create one one-time Price and two recurring monthly Prices, configure their IDs in the API environment, and send `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `invoice.paid`, and `customer.subscription.deleted` events to `/api/billing/stripe/webhook`. Enable Stripe's customer portal for cancellation and payment-method management, but disable plan switching there; users must cancel an active plan before choosing another. Webhook fulfillment, not the browser redirect, grants credits.
+
 ### Ask AI (RAG)
 
 Questions are embedded with **Voyage AI** (`voyage-3-lite`, 512 dims) and matched to the most relevant session chunks via pgvector cosine search before being answered by Claude.
@@ -80,14 +94,16 @@ The Live Activity widget extension is added during `expo prebuild` by `plugins/w
 
 ## Database setup
 
-Run once after provisioning Neon:
+After initializing the base tables from `apps/api/lib/schema.sql`, run this endpoint and re-run it after deploying schema additions:
 
 ```
 POST /api/admin/migrate
-Authorization: Bearer <ADMIN_SECRET>
+Content-Type: application/json
+
+{"secret":"<ADMIN_SECRET>"}
 ```
 
-Creates the `sessions`, `audio_segments`, `transcript_segments`, and `session_chunks` tables plus the `vector` extension and IVFFlat index.
+Creates the RAG and credit-system additions: embedding, credit-ledger, reservation, transaction, and billing-event tables plus the `vector` extension, database credit functions, and IVFFlat index.
 
 After sessions exist, backfill embeddings:
 
@@ -109,6 +125,16 @@ Authorization: Bearer <ADMIN_SECRET>
 | `GROQ_MAX_AUDIO_BYTES` | API | Optional — override the 25 MB Groq file-size guard |
 | `EXERCISE_DATASET_URL` | API | Optional — override the pinned exercise-name reference dataset |
 | `EXPO_PUBLIC_API_URL` | Mobile | Points mobile at the API |
+| `STRIPE_SECRET_KEY` | API | Creates Stripe Checkout and customer-portal sessions |
+| `STRIPE_WEBHOOK_SECRET` | API | Verifies Stripe webhook signatures |
+| `STRIPE_CREDITS_100_PRICE_ID` | API | Stripe one-time 100-credit Price |
+| `STRIPE_MONTHLY_300_PRICE_ID` | API | Stripe recurring 300-credit Price |
+| `STRIPE_MONTHLY_800_PRICE_ID` | API | Stripe recurring 800-credit Price |
+| `REVENUECAT_WEBHOOK_AUTHORIZATION` | API | Shared Authorization header for RevenueCat webhooks |
+| `REVENUECAT_CREDITS_100_PRODUCT_ID` | API | Optional RevenueCat one-time product override |
+| `REVENUECAT_MONTHLY_300_PRODUCT_ID` | API | Optional RevenueCat 300-credit product override |
+| `REVENUECAT_MONTHLY_800_PRODUCT_ID` | API | Optional RevenueCat 800-credit product override |
+| `EXPO_PUBLIC_REVENUECAT_IOS_API_KEY` | Mobile | RevenueCat public iOS SDK key |
 
 ## Known gaps
 

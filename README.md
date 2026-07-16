@@ -26,6 +26,7 @@ Transcription and AI processing run server-side and finish on their own — you 
 | AI extraction & Q&A | Claude (Anthropic) |
 | Embeddings | Voyage AI |
 | Audio storage | Vercel Blob |
+| Billing | RevenueCat + StoreKit (iOS), Stripe Checkout (web) |
 
 ## Layout
 
