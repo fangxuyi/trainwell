@@ -1,11 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
 import type { ExtractionOutput, SourcedValue } from "@/lib/types";
-
-let anthropic: Anthropic;
-function getAnthropic() {
-  if (!anthropic) anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-  return anthropic;
-}
+import { generateText } from "@/lib/language-model";
 
 const EXTRACTION_VERSION = "1.0";
 
@@ -95,14 +89,10 @@ export async function extractWorkoutData(
   transcript: string,
   scopeInstruction?: string
 ): Promise<ExtractionOutput> {
-  const message = await getAnthropic().messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 4096,
+  const text = await generateText({
     system: SYSTEM_PROMPT,
-    messages: [
-      {
-        role: "user",
-        content: `Extract workout data from this session transcript. Session ID: ${sessionId}
+    maxOutputTokens: 4096,
+    prompt: `Extract workout data from this session transcript. Session ID: ${sessionId}
 
 TRANSCRIPT:
 ${transcript}
@@ -111,16 +101,11 @@ ${scopeInstruction ? `WINDOW SCOPE:\n${scopeInstruction}\n` : ""}
 
 Return JSON matching this schema:
 ${OUTPUT_SCHEMA}`,
-      },
-    ],
   });
 
-  const content = message.content[0];
-  if (content.type !== "text") throw new Error("Unexpected response type");
-
   // Extract JSON from response (handle markdown code blocks)
-  const jsonMatch = content.text.match(/```(?:json)?\s*([\s\S]+?)\s*```/) ??
-    content.text.match(/(\{[\s\S]+\})/);
+  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]+?)\s*```/) ??
+    text.match(/(\{[\s\S]+\})/);
 
   if (!jsonMatch) throw new Error("No JSON found in extraction response");
 
@@ -131,11 +116,9 @@ ${OUTPUT_SCHEMA}`,
   return parsed;
 }
 
-// A single Claude call generating a full hour's structured JSON runs close to
-// the token cap (~60-70s of output generation) and blows the serverless
-// timeout. For long sessions we split the transcript into time windows,
-// extract each in parallel (each call is small and fast), and merge — which
-// both fits the timeout and is faster wall-clock.
+// A single model call generating a full hour's structured JSON can approach the
+// output and serverless time limits. Long sessions are split into time windows,
+// extracted in parallel, and merged to keep each request bounded.
 const EXTRACTION_WINDOW_SECONDS = 900; // 15 minutes
 const EXTRACTION_CONTEXT_SECONDS = 90;
 
@@ -257,28 +240,19 @@ export async function answerWorkoutQuestion(
   question: string,
   context: string
 ): Promise<{ answer: string; citations: Array<{ sessionId: string; date: string; excerpt: string }> }> {
-  const message = await getAnthropic().messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 1024,
+  const answer = await generateText({
     system: `You are a personal training assistant. Answer questions about the user's workout history concisely and accurately. Only state facts that are present in the provided context. Cite the specific session when referencing workout data.`,
-    messages: [
-      {
-        role: "user",
-        content: `WORKOUT HISTORY CONTEXT:
+    maxOutputTokens: 1024,
+    prompt: `WORKOUT HISTORY CONTEXT:
 ${context}
 
 QUESTION: ${question}
 
 Answer the question based on the context above. Keep it concise and cite specific sessions.`,
-      },
-    ],
   });
 
-  const content = message.content[0];
-  if (content.type !== "text") throw new Error("Unexpected response type");
-
   return {
-    answer: content.text,
+    answer,
     citations: [],
   };
 }

@@ -38,9 +38,9 @@ export async function transcribeAndExtract(sessionId: string): Promise<void> {
     );
   }
 
-  // Extract workout data with Claude. Long sessions are split into time windows
-  // and extracted in parallel (a single hour-long extraction exceeds the
-  // serverless timeout); short sessions still run as one call.
+  // Extract workout data with the configured language-model provider. Long
+  // sessions are split into time windows and extracted in parallel; short
+  // sessions still run as one call.
   const rawExtraction = await extractWorkoutDataWindowed(
     sessionId,
     transcriptRows.map((s) => ({

@@ -108,9 +108,9 @@ Processing is triggered through `/api/workouts/[id]/process`. The route marks th
 The pipeline makes the following model/service calls:
 
 1. **Transcription:** one Groq Whisper call for the current single audio file.
-2. **Structured extraction:** one Claude Sonnet call for shorter sessions. Long sessions are divided into approximately 15-minute primary windows and extracted with parallel Claude calls.
+2. **Structured extraction:** one call to the configured language-model provider for shorter sessions. Long sessions are divided into approximately 15-minute primary windows and extracted with parallel provider calls.
 3. **Boundary protection:** each long-session window receives up to 90 seconds of adjacent context. The prompt allows that context to identify continuity but explicitly prohibits extracting evidence from it, reducing lost or duplicated sets at boundaries.
-4. **Exercise canonicalization:** no LLM call. Extracted names are deterministically matched against a commit-pinned public GitHub exercise dataset. Low-confidence or ambiguous matches preserve Claude’s original name. Dataset failures are non-fatal.
+4. **Exercise canonicalization:** no LLM call. Extracted names are deterministically matched against a commit-pinned public GitHub exercise dataset. Low-confidence or ambiguous matches preserve the model’s original name. Dataset failures are non-fatal.
 5. **Summary:** no additional LLM call. `generateSummaryText()` deterministically formats the merged structured extraction into the compact workout recap.
 6. **Indexing:** one Voyage AI embeddings request batches the generated overview, exercise, and next-plan chunks for pgvector retrieval.
 
@@ -122,7 +122,9 @@ Ask AI uses retrieval-augmented generation:
 
 1. Voyage `voyage-3-lite` embeds the question into a 512-dimensional vector.
 2. Postgres/pgvector selects the eight closest chunks belonging to the signed-in user.
-3. Claude Sonnet answers from that retrieved context and is instructed not to add unsupported facts.
+3. The configured language-model provider answers from that retrieved context and is instructed not to add unsupported facts.
+
+`AI_PROVIDER` selects `anthropic` (the default) or `openai` for both workout extraction and Ask AI. The shared adapter in `apps/api/lib/language-model.ts` keeps prompts and response shapes provider-independent. `ANTHROPIC_MODEL` and `OPENAI_MODEL` are server-only overrides; changing the provider or model does not alter the mobile or web API contract.
 
 If no embeddings exist, the route falls back to the five most recent completed session summaries. The response type includes citations, but the current implementation returns an empty citation array and puts any session references in the answer text.
 
@@ -241,7 +243,11 @@ curl -X POST https://your-api.example/api/admin/backfill-embeddings \
 |---|---|
 | `DATABASE_URL` | Neon Postgres connection string. |
 | `GROQ_API_KEY` | Groq Whisper transcription. |
-| `ANTHROPIC_API_KEY` | Claude extraction and Ask AI answers. |
+| `AI_PROVIDER` | Language-model backend: `anthropic` (default) or `openai`. |
+| `ANTHROPIC_API_KEY` | Anthropic key, required when the provider is `anthropic`. |
+| `ANTHROPIC_MODEL` | Optional Anthropic model override. |
+| `OPENAI_API_KEY` | OpenAI key, required when the provider is `openai`. |
+| `OPENAI_MODEL` | Optional OpenAI model override. |
 | `VOYAGE_API_KEY` | Session and question embeddings. |
 | `BLOB_READ_WRITE_TOKEN` | Private Vercel Blob access and presigned uploads. |
 | `ADMIN_SECRET` | Protects database migration and backfill routes. |
@@ -305,7 +311,7 @@ Recording, background sync, upload, Live Activity, and RevenueCat changes requir
 - **Permanent sync failures lack a true reset path:** retrying does not reset `failed_permanently` jobs to a runnable state.
 - **POST and DELETE calls have no timeout:** only the mobile GET helper currently uses an abort timeout.
 - **Foreground sync has no concurrency lock:** rapid app-state changes can start redundant workers, although server operations are designed to be idempotent.
-- **Extraction validation is incomplete:** malformed or structurally incomplete Claude JSON can still fail downstream processing.
+- **Extraction validation is incomplete:** malformed or structurally incomplete model JSON can still fail downstream processing.
 - **Window merge can retain rare duplicates:** adjacent context prevents double-counting from context evidence, but independently extracted primary windows can still identify one boundary-spanning exercise twice.
 - **Ask AI citations are incomplete:** answers may name sessions in prose, but the structured `citations` array is empty.
 - **Live Activity display still needs confirmed device QA.**
