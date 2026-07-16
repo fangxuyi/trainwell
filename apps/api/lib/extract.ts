@@ -25,6 +25,7 @@ Rules:
 - Use a clear, conventional canonicalName when the exercise is identifiable, while retaining trainer-spoken wording in spokenNames. Do not force a guess when the movement is unclear.
 - Capture completed set-by-set reps and weights when stated. Use approximate/weakly_inferred values only when the transcript supports them.
 - Keep techniqueNotes and trainerNotes to personalized corrections, safety modifications, progression/regression guidance, or repeated emphasis. Omit generic exercise instructions that do not add session-specific value.
+- When a transcript contains PRIMARY and CONTEXT ONLY sections, extract evidence only from PRIMARY. Use context to understand exercise continuity and references, but never count context-only sets, reps, weights, or cues again.
 
 Return ONLY valid JSON matching the ExtractionOutput schema.`;
 
@@ -91,7 +92,8 @@ const OUTPUT_SCHEMA = `{
 
 export async function extractWorkoutData(
   sessionId: string,
-  transcript: string
+  transcript: string,
+  scopeInstruction?: string
 ): Promise<ExtractionOutput> {
   const message = await getAnthropic().messages.create({
     model: "claude-sonnet-4-6",
@@ -104,6 +106,8 @@ export async function extractWorkoutData(
 
 TRANSCRIPT:
 ${transcript}
+
+${scopeInstruction ? `WINDOW SCOPE:\n${scopeInstruction}\n` : ""}
 
 Return JSON matching this schema:
 ${OUTPUT_SCHEMA}`,
@@ -133,17 +137,38 @@ ${OUTPUT_SCHEMA}`,
 // extract each in parallel (each call is small and fast), and merge — which
 // both fits the timeout and is faster wall-clock.
 const EXTRACTION_WINDOW_SECONDS = 900; // 15 minutes
+const EXTRACTION_CONTEXT_SECONDS = 90;
 
 type WindowSegment = { startSeconds: number; text: string };
 
-function windowTranscript(segs: WindowSegment[]): string {
-  return segs
-    .map((s) => {
-      const m = Math.floor(s.startSeconds / 60);
-      const sec = Math.floor(s.startSeconds % 60);
-      return `[${m}:${sec.toString().padStart(2, "0")}] ${s.text}`;
-    })
-    .join("\n");
+function formatSegment(segment: WindowSegment): string {
+  const minutes = Math.floor(segment.startSeconds / 60);
+  const seconds = Math.floor(segment.startSeconds % 60);
+  return `[${minutes}:${seconds.toString().padStart(2, "0")}] ${segment.text}`;
+}
+
+function windowTranscript(segments: WindowSegment[]): string {
+  return segments.map(formatSegment).join("\n");
+}
+
+function scopedWindowTranscript(windows: WindowSegment[][], index: number): string {
+  const primary = windows[index];
+  const primaryStart = primary[0].startSeconds;
+  const nextStart = windows[index + 1]?.[0].startSeconds;
+  const before = (windows[index - 1] ?? []).filter(
+    (segment) => segment.startSeconds >= primaryStart - EXTRACTION_CONTEXT_SECONDS
+  );
+  const after = (windows[index + 1] ?? []).filter(
+    (segment) => nextStart != null && segment.startSeconds < nextStart + EXTRACTION_CONTEXT_SECONDS
+  );
+
+  return [
+    before.length ? `CONTEXT ONLY — BEFORE\n${windowTranscript(before)}` : null,
+    `PRIMARY — EXTRACT EVIDENCE FROM THIS SECTION\n${windowTranscript(primary)}`,
+    after.length ? `CONTEXT ONLY — AFTER\n${windowTranscript(after)}` : null,
+  ]
+    .filter((section): section is string => !!section)
+    .join("\n\n");
 }
 
 export async function extractWorkoutDataWindowed(
@@ -171,8 +196,12 @@ export async function extractWorkoutDataWindowed(
   }
   if (current.length) windows.push(current);
 
+  const scopeInstruction =
+    "Extract only work supported by the PRIMARY section. Use CONTEXT ONLY sections to identify an exercise that crosses the boundary and to resolve pronouns or continuation, but do not count context-only evidence. Preserve the global transcript timestamps.";
   const partials = await Promise.all(
-    windows.map((w) => extractWorkoutData(sessionId, windowTranscript(w)))
+    windows.map((_, index) =>
+      extractWorkoutData(sessionId, scopedWindowTranscript(windows, index), scopeInstruction)
+    )
   );
   return mergeExtractions(sessionId, partials);
 }
