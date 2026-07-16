@@ -2,6 +2,7 @@ import type { SyncJob, SyncJobType, SyncJobStatus } from "@trainwell/schemas";
 import { getDb } from "./client";
 import { now } from "../utils/time";
 import { uuid } from "../utils/uuid";
+import { getCurrentUserId } from "../auth/currentUser";
 
 const BACKOFF_DELAYS_MS = [5000, 15000, 60000, 300000, 900000];
 
@@ -52,14 +53,18 @@ export async function getJobById(id: string): Promise<SyncJob | null> {
 
 export async function getDueJobs(limit = 10): Promise<SyncJob[]> {
   const db = await getDb();
+  const userId = getCurrentUserId();
+  if (!userId) return [];
   const ts = now();
   const rows = await db.getAllAsync<Record<string, unknown>>(
-    `SELECT * FROM sync_jobs
-     WHERE status IN ('pending', 'retry_wait')
-       AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-     ORDER BY created_at ASC
+    `SELECT j.* FROM sync_jobs j
+     JOIN sessions s ON s.id = j.session_id
+     WHERE s.user_id = ?
+       AND j.status IN ('pending', 'retry_wait')
+       AND (j.next_attempt_at IS NULL OR j.next_attempt_at <= ?)
+     ORDER BY j.created_at ASC
      LIMIT ?`,
-    [ts, limit]
+    [userId, ts, limit]
   );
   return rows.map(rowToJob);
 }
