@@ -107,6 +107,7 @@ Authorization: Bearer <ADMIN_SECRET>
 | `BLOB_READ_WRITE_TOKEN` | API | Vercel Blob audio storage |
 | `ADMIN_SECRET` | API | Protects `/api/admin/*` routes |
 | `GROQ_MAX_AUDIO_BYTES` | API | Optional — override the 25 MB Groq file-size guard |
+| `EXERCISE_DATASET_URL` | API | Optional — override the pinned exercise-name reference dataset |
 | `EXPO_PUBLIC_API_URL` | Mobile | Points mobile at the API |
 
 ## Known gaps

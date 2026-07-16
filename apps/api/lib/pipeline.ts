@@ -3,6 +3,7 @@ import { extractWorkoutData, extractWorkoutDataWindowed } from "./extract";
 import { generateSummaryText } from "./markdown";
 import { embedTexts } from "./voyage";
 import { chunkExtraction } from "./chunks";
+import { canonicalizeExtraction } from "./exercise-dataset";
 import { randomUUID } from "crypto";
 
 export async function transcribeAndExtract(sessionId: string): Promise<void> {
@@ -40,13 +41,17 @@ export async function transcribeAndExtract(sessionId: string): Promise<void> {
   // Extract workout data with Claude. Long sessions are split into time windows
   // and extracted in parallel (a single hour-long extraction exceeds the
   // serverless timeout); short sessions still run as one call.
-  const extraction = await extractWorkoutDataWindowed(
+  const rawExtraction = await extractWorkoutDataWindowed(
     sessionId,
     transcriptRows.map((s) => ({
       startSeconds: s.start_seconds as number,
       text: s.text as string,
     }))
   );
+  const extraction = await canonicalizeExtraction(rawExtraction).catch((error) => {
+    console.warn(`Exercise canonicalization skipped for session ${sessionId}:`, error);
+    return rawExtraction;
+  });
 
   // Generate compact summary in workout-summary skill format
   const sessionRows = await sql`SELECT * FROM sessions WHERE id = ${sessionId}`;
