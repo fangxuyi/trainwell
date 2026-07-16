@@ -85,6 +85,17 @@ export async function markJobCompleted(id: string): Promise<void> {
   );
 }
 
+export async function markJobBlocked(id: string, error: string): Promise<void> {
+  const db = await getDb();
+  const ts = now();
+  await db.runAsync(
+    `UPDATE sync_jobs
+     SET status = 'blocked', last_error = ?, next_attempt_at = NULL, updated_at = ?
+     WHERE id = ?`,
+    [error, ts, id]
+  );
+}
+
 export async function markJobFailed(
   id: string,
   error: string,

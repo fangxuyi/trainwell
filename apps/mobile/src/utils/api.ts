@@ -4,6 +4,25 @@ import { getAuthToken } from "../auth/token";
 const BASE_URL =
   process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly body: unknown
+  ) {
+    super(message);
+  }
+}
+
+async function apiError(res: Response, path: string): Promise<ApiError> {
+  const text = await res.text().catch(() => res.statusText);
+  let body: unknown = text;
+  try {
+    body = JSON.parse(text);
+  } catch {}
+  return new ApiError(`API ${path} failed (${res.status}): ${text}`, res.status, body);
+}
+
 // Builds request headers with the current Clerk session token (if signed in),
 // so the API can identify the user and scope data to them.
 async function authHeaders(extra?: Record<string, string>): Promise<Record<string, string>> {
@@ -21,8 +40,7 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new Error(`API ${path} failed (${res.status}): ${text}`);
+    throw await apiError(res, path);
   }
   return res.json() as Promise<T>;
 }
@@ -35,7 +53,7 @@ export async function apiGet<T>(path: string, timeoutMs = 5000): Promise<T> {
       signal: controller.signal,
       headers: await authHeaders(),
     });
-    if (!res.ok) throw new Error(`API GET ${path} failed (${res.status})`);
+    if (!res.ok) throw await apiError(res, path);
     return res.json() as Promise<T>;
   } finally {
     clearTimeout(timer);
@@ -48,7 +66,7 @@ export async function apiDelete(path: string): Promise<void> {
     headers: await authHeaders(),
   });
   if (!res.ok && res.status !== 404) {
-    throw new Error(`API DELETE ${path} failed (${res.status})`);
+    throw await apiError(res, path);
   }
 }
 
@@ -91,13 +109,20 @@ export async function uploadAudioChunk(
   }
 
   // 3. Register the uploaded blob so the server records it and transcribes.
-  await apiPost<unknown>(`/api/workouts/${sessionId}/audio-segments`, {
+  const segment = await apiPost<{
+    remote_status?: string;
+    warning?: string;
+    message?: string;
+  }>(`/api/workouts/${sessionId}/audio-segments`, {
     chunkId,
     sequence,
     blobUrl,
     durationSeconds,
     sizeBytes,
   });
+  if (segment.remote_status === "failed") {
+    throw new Error(segment.message ?? segment.warning ?? "Transcription failed");
+  }
 
   return blobUrl;
 }

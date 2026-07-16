@@ -316,6 +316,12 @@ export default function SessionDetailScreen() {
           >
             <Text style={styles.retryButtonText}>Retry Sync</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => router.push("/credits")}
+          >
+            <Text style={styles.retryButtonText}>Get Credits</Text>
+          </TouchableOpacity>
         </View>
       )}
 

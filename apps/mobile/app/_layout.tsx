@@ -8,6 +8,7 @@ import * as Notifications from "expo-notifications";
 import { retryStalledSessions, reconcileUnsyncedSessions } from "../src/sync/worker";
 import { tokenCache } from "../src/auth/tokenCache";
 import { setTokenGetter } from "../src/auth/token";
+import { configureRevenueCat } from "../src/billing/revenueCat";
 
 const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
 
@@ -28,7 +29,7 @@ const screenOptions = {
 };
 
 function RootNavigator() {
-  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const { isLoaded, isSignedIn, getToken, userId } = useAuth();
   const segments = useSegments();
   const router = useRouter();
 
@@ -36,6 +37,10 @@ function RootNavigator() {
   useEffect(() => {
     setTokenGetter(isSignedIn ? getToken : null);
   }, [isSignedIn, getToken]);
+
+  useEffect(() => {
+    if (isSignedIn && userId) configureRevenueCat(userId).catch(console.error);
+  }, [isSignedIn, userId]);
 
   useEffect(() => {
     getDb().catch(console.error);
@@ -87,6 +92,7 @@ function RootNavigator() {
       <Stack.Screen name="history/index" options={{ title: "History" }} />
       <Stack.Screen name="review/[id]" options={{ title: "Review Session" }} />
       <Stack.Screen name="ask" options={{ title: "Ask AI" }} />
+      <Stack.Screen name="credits" options={{ title: "Credits" }} />
     </Stack>
   );
 }

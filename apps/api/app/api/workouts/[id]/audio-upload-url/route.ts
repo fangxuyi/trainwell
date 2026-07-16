@@ -5,6 +5,11 @@ import {
   parseStoreIdFromDelegationToken,
 } from "@vercel/blob";
 import { requireSessionOwner } from "@/lib/auth";
+import sql from "@/lib/db";
+import {
+  InsufficientCreditsError,
+  reserveCreditsForSession,
+} from "@/lib/credits";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +34,29 @@ export async function POST(
 
   const owner = await requireSessionOwner(sessionId);
   if (owner instanceof NextResponse) return owner;
+
+  const sessions = await sql`
+    SELECT duration_seconds FROM sessions WHERE id = ${sessionId}
+  `;
+  try {
+    await reserveCreditsForSession(
+      owner.userId,
+      sessionId,
+      Number(sessions[0]?.duration_seconds ?? 0)
+    );
+  } catch (error) {
+    if (error instanceof InsufficientCreditsError) {
+      return NextResponse.json(
+        {
+          error: "insufficient_credits",
+          requiredCredits: error.requiredCredits,
+          balance: error.balance,
+        },
+        { status: 402 }
+      );
+    }
+    throw error;
+  }
 
   const body = (await req.json().catch(() => ({}))) as {
     sequence?: number;

@@ -72,7 +72,54 @@ CREATE TABLE IF NOT EXISTS processing_jobs (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS credit_accounts (
+  user_id TEXT PRIMARY KEY,
+  permanent_credits INTEGER NOT NULL DEFAULT 100 CHECK (permanent_credits >= 0),
+  subscription_credits INTEGER NOT NULL DEFAULT 0 CHECK (subscription_credits >= 0),
+  subscription_tier TEXT,
+  subscription_period_start TIMESTAMPTZ,
+  subscription_period_end TIMESTAMPTZ,
+  subscription_source TEXT,
+  stripe_customer_id TEXT UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS credit_reservations (
+  session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  required_credits INTEGER NOT NULL CHECK (required_credits > 0),
+  subscription_credits INTEGER NOT NULL DEFAULT 0 CHECK (subscription_credits >= 0),
+  permanent_credits INTEGER NOT NULL DEFAULT 0 CHECK (permanent_credits >= 0),
+  subscription_period_end TIMESTAMPTZ,
+  status TEXT NOT NULL CHECK (status IN ('reserved', 'consumed', 'refunded')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS credit_transactions (
+  id BIGSERIAL PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  session_id TEXT,
+  type TEXT NOT NULL,
+  permanent_delta INTEGER NOT NULL DEFAULT 0,
+  subscription_delta INTEGER NOT NULL DEFAULT 0,
+  external_event_id TEXT UNIQUE,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS billing_events (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  product_id TEXT,
+  payload JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audio_segments_session ON audio_segments(session_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_transcript_session ON transcript_segments(session_id);
 CREATE INDEX IF NOT EXISTS idx_processing_jobs_session ON processing_jobs(session_id);
+CREATE INDEX IF NOT EXISTS credit_transactions_user_idx ON credit_transactions(user_id, created_at DESC);

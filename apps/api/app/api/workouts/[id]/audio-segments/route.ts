@@ -3,6 +3,12 @@ import { put } from "@vercel/blob";
 import sql from "@/lib/db";
 import { transcribeAudioUrl } from "@/lib/transcribe";
 import { requireSessionOwner } from "@/lib/auth";
+import {
+  consumeSessionCredits,
+  InsufficientCreditsError,
+  refundSessionCredits,
+  reserveCreditsForSession,
+} from "@/lib/credits";
 
 export const dynamic = "force-dynamic";
 // Transcription runs inline here; give the Groq call headroom for a full-length
@@ -33,6 +39,29 @@ export async function POST(
 
   const owner = await requireSessionOwner(sessionId);
   if (owner instanceof NextResponse) return owner;
+
+  const sessions = await sql`
+    SELECT duration_seconds FROM sessions WHERE id = ${sessionId}
+  `;
+  try {
+    await reserveCreditsForSession(
+      owner.userId,
+      sessionId,
+      Number(sessions[0]?.duration_seconds ?? 0)
+    );
+  } catch (error) {
+    if (error instanceof InsufficientCreditsError) {
+      return NextResponse.json(
+        {
+          error: "insufficient_credits",
+          requiredCredits: error.requiredCredits,
+          balance: error.balance,
+        },
+        { status: 402 }
+      );
+    }
+    throw error;
+  }
 
   // Two upload paths:
   //  - application/json: the phone already uploaded the file directly to Blob
@@ -145,6 +174,7 @@ export async function POST(
           UPDATE audio_segments SET remote_status = 'failed', updated_at = now()
           WHERE id = ${chunkId}
         `;
+        await refundSessionCredits(sessionId);
         segment.remote_status = "failed";
         return NextResponse.json(
           {
@@ -174,6 +204,7 @@ export async function POST(
         UPDATE audio_segments SET remote_status = 'transcribed', updated_at = now()
         WHERE id = ${chunkId}
       `;
+      await consumeSessionCredits(sessionId);
       segment.remote_status = "transcribed";
     } catch (err) {
       // Don't 500 the upload (the audio is safely stored), but do NOT swallow
@@ -184,6 +215,7 @@ export async function POST(
         UPDATE audio_segments SET remote_status = 'failed', updated_at = now()
         WHERE id = ${chunkId}
       `;
+      await refundSessionCredits(sessionId);
       return NextResponse.json(
         {
           ...segment,

@@ -29,6 +29,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <Link href="/ask" className="text-zinc-400 hover:text-zinc-100 transition-colors">
                   Ask AI
                 </Link>
+                <Link href="/credits" className="text-zinc-400 hover:text-zinc-100 transition-colors">
+                  Credits
+                </Link>
               </div>
               <div className="ml-auto">
                 <UserButton />
