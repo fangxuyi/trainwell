@@ -1,247 +1,426 @@
+import type { CreditBalance, WorkoutSession } from "@trainwell/schemas";
+import { useUser } from "@clerk/clerk-expo";
+import { useCallback, useState } from "react";
 import {
-  View,
+  ActivityIndicator,
+  FlatList,
+  SafeAreaView,
+  StyleSheet,
   Text,
   TouchableOpacity,
-  FlatList,
-  StyleSheet,
-  ActivityIndicator,
+  View,
 } from "react-native";
-import { useRouter } from "expo-router";
-import { useCallback, useState } from "react";
-import { useFocusEffect } from "expo-router";
-import type { WorkoutSession } from "@trainwell/schemas";
-import { listSessions, getIncompleteSession, updateSessionStatus, upsertSessionsFromServer } from "../src/db/sessions";
-import { apiGet } from "../src/utils/api";
+import { useFocusEffect, useRouter } from "expo-router";
+import {
+  getIncompleteSession,
+  listSessions,
+  updateSessionStatus,
+  upsertSessionsFromServer,
+} from "../src/db/sessions";
 import { recorder } from "../src/recording/recorder";
+import { AccountDrawer } from "../src/ui/AccountDrawer";
+import { colors, radii } from "../src/ui/theme";
+import { apiGet } from "../src/utils/api";
 import { formatDuration } from "../src/utils/time";
+
+function greeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+function statusPresentation(session: WorkoutSession): { label: string; color: string } {
+  if (session.localStatus === "local_error" || session.remoteStatus === "failed") {
+    return { label: "Needs attention", color: colors.danger };
+  }
+  if (session.localStatus === "syncing" || session.remoteStatus === "processing") {
+    return { label: "Processing", color: colors.warning };
+  }
+  if (session.localStatus === "cached" || session.syncStatus === "synchronized") {
+    return { label: "Ready", color: colors.success };
+  }
+  return { label: "Saved locally", color: colors.blue };
+}
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { user } = useUser();
   const [sessions, setSessions] = useState<WorkoutSession[]>([]);
-  const [incompleteSession, setIncompleteSession] =
-    useState<WorkoutSession | null>(null);
+  const [incompleteSession, setIncompleteSession] = useState<WorkoutSession | null>(null);
+  const [balance, setBalance] = useState<CreditBalance | null>(null);
   const [loading, setLoading] = useState(true);
-  const [credits, setCredits] = useState<number | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const firstName = user?.firstName || user?.username || "there";
 
   useFocusEffect(
     useCallback(() => {
+      let active = true;
+
       const load = async () => {
         setLoading(true);
-        // If recorder is not actively running, any session stuck in
-        // recording/paused was interrupted — mark it complete so it
-        // shows up in history instead of the resume banner.
         if (!recorder.isActive()) {
           const stale = await getIncompleteSession();
-          if (stale) {
-            await updateSessionStatus(stale.id, { localStatus: "locally_complete" });
-          }
+          if (stale) await updateSessionStatus(stale.id, { localStatus: "locally_complete" });
         }
-        // Show local sessions immediately — don't block on the network.
-        const [all, incomplete] = await Promise.all([
+
+        const [localSessions, incomplete] = await Promise.all([
           listSessions(20),
           recorder.isActive() ? getIncompleteSession() : Promise.resolve(null),
         ]);
-        setSessions(all.filter((s) => s.localStatus !== "recording" && s.localStatus !== "paused"));
+        if (!active) return;
+
+        setSessions(
+          localSessions.filter(
+            (session) => session.localStatus !== "recording" && session.localStatus !== "paused"
+          )
+        );
         setIncompleteSession(incomplete);
         setLoading(false);
-        // Background sync: pull server sessions then refresh the list if anything new.
+
         apiGet<Record<string, unknown>[]>("/api/workouts")
           .then((rows) => upsertSessionsFromServer(rows))
           .then(() => listSessions(20))
-          .then((refreshed) =>
-            setSessions(refreshed.filter((s) => s.localStatus !== "recording" && s.localStatus !== "paused"))
-          )
-          .catch(() => {}); // ignore if offline or slow
-        apiGet<{ totalCredits: number }>("/api/credits")
-          .then((value) => setCredits(value.totalCredits))
+          .then((refreshed) => {
+            if (!active) return;
+            setSessions(
+              refreshed.filter(
+                (session) =>
+                  session.localStatus !== "recording" && session.localStatus !== "paused"
+              )
+            );
+          })
+          .catch(() => {});
+
+        apiGet<CreditBalance>("/api/credits")
+          .then((current) => {
+            if (active) setBalance(current);
+          })
           .catch(() => {});
       };
+
       load();
+      return () => {
+        active = false;
+      };
     }, [])
   );
 
-  const renderSession = ({ item }: { item: WorkoutSession }) => (
-    <TouchableOpacity
-      style={styles.sessionCard}
-      onPress={() => router.push(`/session/${item.id}`)}
-    >
-      <View style={styles.sessionHeader}>
-        <Text style={styles.sessionType}>
-          {item.workoutType ?? "Workout"}
-        </Text>
-        <Text style={styles.sessionStatus}>{item.localStatus}</Text>
-      </View>
-      <Text style={styles.sessionDate}>
-        {new Date(item.startedAt).toLocaleDateString("en-US", {
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-        })}
-      </Text>
-      {item.durationSeconds ? (
-        <Text style={styles.sessionDuration}>
-          {formatDuration(item.durationSeconds)}
-        </Text>
-      ) : null}
-    </TouchableOpacity>
-  );
-
   return (
-    <View style={styles.container}>
-      {incompleteSession && (
-        <TouchableOpacity
-          style={styles.resumeBanner}
-          onPress={() => router.push("/session/active")}
-        >
-          <Text style={styles.resumeText}>
-            Resume active session →
-          </Text>
-        </TouchableOpacity>
-      )}
+    <SafeAreaView style={styles.safeArea}>
+      <AccountDrawer
+        visible={drawerOpen}
+        balance={balance}
+        onClose={() => setDrawerOpen(false)}
+      />
 
-      <View style={styles.topButtons}>
-        <TouchableOpacity
-          style={styles.startButton}
-          onPress={() => router.push("/session/new")}
-        >
-          <Text style={styles.startButtonText}>Start New Workout</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.askButton}
-          onPress={() => router.push("/ask")}
-        >
-          <Text style={styles.askButtonText}>Ask AI</Text>
-        </TouchableOpacity>
-      </View>
+      <FlatList
+        data={sessions}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => <SessionCard session={item} onPress={() => router.push(`/session/${item.id}`)} />}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.listContent}
+        ListHeaderComponent={
+          <>
+            <View style={styles.topBar}>
+              <View>
+                <Text style={styles.brand}>TRAINWELL</Text>
+                <Text style={styles.greeting}>{greeting()}, {firstName}</Text>
+              </View>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Open account menu"
+                style={styles.menuButton}
+                onPress={() => setDrawerOpen(true)}
+              >
+                <View style={styles.menuLine} />
+                <View style={[styles.menuLine, styles.menuLineShort]} />
+                <View style={styles.menuLine} />
+              </TouchableOpacity>
+            </View>
 
-      <TouchableOpacity style={styles.creditButton} onPress={() => router.push("/credits")}>
-        <Text style={styles.creditButtonText}>
-          {credits === null ? "Credits" : `${credits} credits available`}
+            {incompleteSession ? (
+              <TouchableOpacity style={styles.resumeCard} onPress={() => router.push("/session/active")}>
+                <View style={styles.pulseOuter}><View style={styles.pulseInner} /></View>
+                <View style={styles.resumeContent}>
+                  <Text style={styles.resumeEyebrow}>SESSION IN PROGRESS</Text>
+                  <Text style={styles.resumeTitle}>Keep your momentum</Text>
+                </View>
+                <Text style={styles.resumeArrow}>→</Text>
+              </TouchableOpacity>
+            ) : null}
+
+            <TouchableOpacity style={styles.heroCard} onPress={() => router.push("/session/new")}>
+              <View style={styles.heroOrbLarge} />
+              <View style={styles.heroOrbSmall} />
+              <Text style={styles.heroEyebrow}>READY WHEN YOU ARE</Text>
+              <Text style={styles.heroTitle}>Start a new{`\n`}workout</Text>
+              <Text style={styles.heroBody}>
+                Capture every set, cue, and breakthrough—hands free.
+              </Text>
+              <View style={styles.heroActionRow}>
+                <Text style={styles.heroActionText}>Begin recording</Text>
+                <View style={styles.heroActionButton}>
+                  <Text style={styles.heroActionArrow}>↗</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+
+            <View style={styles.utilityRow}>
+              <TouchableOpacity style={styles.aiCard} onPress={() => router.push("/ask")}>
+                <Text style={styles.aiSpark}>✦</Text>
+                <Text style={styles.utilityEyebrow}>TRAINING INTELLIGENCE</Text>
+                <Text style={styles.utilityTitle}>Ask AI</Text>
+                <Text style={styles.utilityBody}>Find patterns across your sessions.</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.balanceCard} onPress={() => router.push("/credits")}>
+                <Text style={styles.balanceEyebrow}>CREDITS</Text>
+                <Text style={styles.balanceValue}>{balance?.totalCredits ?? "—"}</Text>
+                <Text style={styles.balanceUnit}>minutes available</Text>
+                <View style={styles.balanceFooter}>
+                  <Text style={styles.balancePlan}>
+                    {balance?.subscriptionTier ? "Monthly plan" : "Pay as you go"}
+                  </Text>
+                  <Text style={styles.balanceArrow}>→</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.sectionHeader}>
+              <View>
+                <Text style={styles.sectionEyebrow}>YOUR PROGRESS</Text>
+                <Text style={styles.sectionTitle}>Recent sessions</Text>
+              </View>
+              <TouchableOpacity onPress={() => router.push("/history")}>
+                <Text style={styles.seeAll}>See all</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        }
+        ListEmptyComponent={
+          loading ? (
+            <ActivityIndicator color={colors.accent} style={styles.loader} />
+          ) : (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyNumber}>01</Text>
+              <Text style={styles.emptyTitle}>Your first session starts here.</Text>
+              <Text style={styles.emptyBody}>Record a workout and Trainwell will build your history automatically.</Text>
+            </View>
+          )
+        }
+      />
+    </SafeAreaView>
+  );
+}
+
+function SessionCard({ session, onPress }: { session: WorkoutSession; onPress: () => void }) {
+  const date = new Date(session.startedAt);
+  const status = statusPresentation(session);
+  return (
+    <TouchableOpacity style={styles.sessionCard} onPress={onPress}>
+      <View style={styles.dateTile}>
+        <Text style={styles.dateMonth}>
+          {date.toLocaleDateString("en-US", { month: "short" }).toUpperCase()}
         </Text>
-        <Text style={styles.creditArrow}>Buy →</Text>
-      </TouchableOpacity>
-
-      <Text style={styles.sectionTitle}>Recent Sessions</Text>
-
-      {loading ? (
-        <ActivityIndicator color="#38BDF8" style={{ marginTop: 32 }} />
-      ) : sessions.length === 0 ? (
-        <Text style={styles.empty}>No sessions yet. Start your first workout!</Text>
-      ) : (
-        <FlatList
-          data={sessions}
-          keyExtractor={(item) => item.id}
-          renderItem={renderSession}
-          contentContainerStyle={{ paddingBottom: 40 }}
-        />
-      )}
-    </View>
+        <Text style={styles.dateDay}>{date.getDate()}</Text>
+      </View>
+      <View style={styles.sessionContent}>
+        <Text style={styles.sessionType} numberOfLines={1}>{session.workoutType || "Training session"}</Text>
+        <Text style={styles.sessionMeta} numberOfLines={1}>
+          {[session.trainerName ? `with ${session.trainerName}` : null, session.durationSeconds ? formatDuration(session.durationSeconds) : null]
+            .filter(Boolean)
+            .join("  ·  ") || "Workout captured"}
+        </Text>
+        <View style={styles.statusRow}>
+          <View style={[styles.statusDot, { backgroundColor: status.color }]} />
+          <Text style={[styles.sessionStatus, { color: status.color }]}>{status.label}</Text>
+        </View>
+      </View>
+      <Text style={styles.sessionArrow}>›</Text>
+    </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0F172A",
-    padding: 16,
-  },
-  resumeBanner: {
-    backgroundColor: "#1E3A5F",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: "#38BDF8",
-  },
-  resumeText: {
-    color: "#38BDF8",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  topButtons: {
+  safeArea: { flex: 1, backgroundColor: colors.background },
+  listContent: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 44 },
+  topBar: {
     flexDirection: "row",
-    gap: 10,
-    marginBottom: 28,
-  },
-  startButton: {
-    flex: 1,
-    backgroundColor: "#2563EB",
-    borderRadius: 14,
-    padding: 18,
     alignItems: "center",
-  },
-  startButtonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  askButton: {
-    backgroundColor: "#1E293B",
-    borderRadius: 14,
-    padding: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: 90,
-  },
-  askButtonText: {
-    color: "#38BDF8",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  sectionTitle: {
-    color: "#94A3B8",
-    fontSize: 13,
-    fontWeight: "600",
-    letterSpacing: 1,
-    textTransform: "uppercase",
-    marginBottom: 12,
-  },
-  creditButton: {
-    flexDirection: "row",
     justifyContent: "space-between",
-    backgroundColor: "#172554",
-    borderRadius: 12,
-    padding: 14,
     marginBottom: 24,
   },
-  creditButtonText: { color: "#BFDBFE", fontWeight: "600" },
-  creditArrow: { color: "#38BDF8", fontWeight: "700" },
+  brand: { color: colors.accent, fontSize: 11, fontWeight: "900", letterSpacing: 2.4 },
+  greeting: { color: colors.textMuted, fontSize: 13, marginTop: 5 },
+  menuButton: {
+    width: 46,
+    height: 46,
+    borderRadius: 16,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+  },
+  menuLine: { width: 18, height: 2, borderRadius: 1, backgroundColor: colors.text },
+  menuLineShort: { width: 12, alignSelf: "center", marginLeft: 6 },
+  resumeCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.violetDark,
+    borderRadius: radii.medium,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "rgba(155, 138, 251, 0.24)",
+  },
+  pulseOuter: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(155, 138, 251, 0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  pulseInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.violet },
+  resumeContent: { flex: 1 },
+  resumeEyebrow: { color: colors.violet, fontSize: 9, fontWeight: "900", letterSpacing: 1.1 },
+  resumeTitle: { color: colors.text, fontSize: 15, fontWeight: "800", marginTop: 3 },
+  resumeArrow: { color: colors.violet, fontSize: 20 },
+  heroCard: {
+    minHeight: 286,
+    borderRadius: 30,
+    backgroundColor: colors.accent,
+    padding: 24,
+    overflow: "hidden",
+    marginBottom: 12,
+  },
+  heroOrbLarge: {
+    position: "absolute",
+    width: 210,
+    height: 210,
+    borderRadius: 105,
+    right: -68,
+    top: -62,
+    borderWidth: 38,
+    borderColor: "rgba(16, 23, 7, 0.07)",
+  },
+  heroOrbSmall: {
+    position: "absolute",
+    width: 78,
+    height: 78,
+    borderRadius: 39,
+    right: 38,
+    bottom: 46,
+    backgroundColor: "rgba(255, 255, 255, 0.16)",
+  },
+  heroEyebrow: { color: "#4E6726", fontSize: 10, fontWeight: "900", letterSpacing: 1.5 },
+  heroTitle: {
+    color: colors.accentText,
+    fontSize: 42,
+    lineHeight: 43,
+    fontWeight: "900",
+    letterSpacing: -1.6,
+    marginTop: 16,
+  },
+  heroBody: { color: "#3F5221", fontSize: 14, lineHeight: 20, width: "72%", marginTop: 14, fontWeight: "600" },
+  heroActionRow: {
+    marginTop: "auto",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  heroActionText: { color: colors.accentText, fontSize: 14, fontWeight: "900" },
+  heroActionButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.accentText,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroActionArrow: { color: colors.accent, fontSize: 22, fontWeight: "700" },
+  utilityRow: { flexDirection: "row", gap: 12, marginBottom: 34 },
+  aiCard: {
+    flex: 1.18,
+    minHeight: 174,
+    borderRadius: radii.large,
+    backgroundColor: colors.violetDark,
+    borderWidth: 1,
+    borderColor: "rgba(155, 138, 251, 0.2)",
+    padding: 17,
+  },
+  aiSpark: { color: colors.violet, fontSize: 25, marginBottom: 18 },
+  utilityEyebrow: { color: colors.violet, fontSize: 8, fontWeight: "900", letterSpacing: 1.15 },
+  utilityTitle: { color: colors.text, fontSize: 24, fontWeight: "900", marginTop: 5, letterSpacing: -0.5 },
+  utilityBody: { color: "#ACA4D7", fontSize: 11, lineHeight: 16, marginTop: 7 },
+  balanceCard: {
+    flex: 1,
+    minHeight: 174,
+    borderRadius: radii.large,
+    backgroundColor: colors.surfaceElevated,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 17,
+  },
+  balanceEyebrow: { color: colors.textFaint, fontSize: 9, fontWeight: "900", letterSpacing: 1.3 },
+  balanceValue: { color: colors.text, fontSize: 40, fontWeight: "900", letterSpacing: -1.5, marginTop: 12 },
+  balanceUnit: { color: colors.textMuted, fontSize: 10, fontWeight: "600" },
+  balanceFooter: { marginTop: "auto", flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  balancePlan: { color: colors.accent, fontSize: 10, fontWeight: "800" },
+  balanceArrow: { color: colors.accent, fontSize: 17 },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    marginBottom: 13,
+  },
+  sectionEyebrow: { color: colors.textFaint, fontSize: 9, fontWeight: "900", letterSpacing: 1.4 },
+  sectionTitle: { color: colors.text, fontSize: 24, fontWeight: "900", letterSpacing: -0.6, marginTop: 4 },
+  seeAll: { color: colors.accent, fontSize: 12, fontWeight: "800", paddingBottom: 3 },
   sessionCard: {
-    backgroundColor: "#1E293B",
-    borderRadius: 12,
-    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.medium,
+    padding: 13,
     marginBottom: 10,
   },
-  sessionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+  dateTile: {
+    width: 52,
+    height: 62,
+    borderRadius: 14,
+    backgroundColor: colors.surfaceMuted,
     alignItems: "center",
-    marginBottom: 4,
+    justifyContent: "center",
+    marginRight: 13,
   },
-  sessionType: {
-    color: "#F1F5F9",
-    fontSize: 16,
-    fontWeight: "600",
+  dateMonth: { color: colors.accent, fontSize: 9, fontWeight: "900", letterSpacing: 1 },
+  dateDay: { color: colors.text, fontSize: 22, fontWeight: "900", marginTop: 1 },
+  sessionContent: { flex: 1 },
+  sessionType: { color: colors.text, fontSize: 15, fontWeight: "800" },
+  sessionMeta: { color: colors.textMuted, fontSize: 11, marginTop: 4 },
+  statusRow: { flexDirection: "row", alignItems: "center", marginTop: 7 },
+  statusDot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
+  sessionStatus: { fontSize: 10, fontWeight: "800" },
+  sessionArrow: { color: colors.textFaint, fontSize: 24, fontWeight: "300", marginLeft: 8 },
+  loader: { marginTop: 28 },
+  emptyCard: {
+    minHeight: 150,
+    borderRadius: radii.large,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderStyle: "dashed",
+    padding: 20,
+    backgroundColor: "rgba(16, 21, 32, 0.6)",
   },
-  sessionStatus: {
-    color: "#64748B",
-    fontSize: 12,
-    textTransform: "capitalize",
-  },
-  sessionDate: {
-    color: "#94A3B8",
-    fontSize: 14,
-    marginBottom: 2,
-  },
-  sessionDuration: {
-    color: "#64748B",
-    fontSize: 13,
-  },
-  empty: {
-    color: "#475569",
-    textAlign: "center",
-    marginTop: 48,
-    fontSize: 15,
-    lineHeight: 22,
-  },
+  emptyNumber: { color: colors.accent, fontSize: 11, fontWeight: "900", letterSpacing: 1.5 },
+  emptyTitle: { color: colors.text, fontSize: 18, fontWeight: "800", marginTop: 12 },
+  emptyBody: { color: colors.textMuted, fontSize: 12, lineHeight: 18, marginTop: 6, maxWidth: 280 },
 });

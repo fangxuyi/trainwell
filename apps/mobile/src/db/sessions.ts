@@ -7,6 +7,7 @@ import type {
 import { getDb } from "./client";
 import { now } from "../utils/time";
 import { uuid } from "../utils/uuid";
+import { getCurrentUserId, requireCurrentUserId } from "../auth/currentUser";
 
 function rowToSession(row: Record<string, unknown>): WorkoutSession {
   return {
@@ -67,15 +68,17 @@ export async function createSession(
   const id = uuid();
   const ts = now();
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const userId = requireCurrentUserId();
 
   await db.runAsync(
     `INSERT INTO sessions
-      (id, started_at, timezone, workout_type, trainer_name, goals,
+      (id, user_id, started_at, timezone, workout_type, trainer_name, goals,
        processing_mode, audio_retention_policy, local_status,
        remote_status, sync_status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', 'not_created', 'local_only', ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 'not_created', 'local_only', ?, ?)`,
     [
       id,
+      userId,
       ts,
       timezone,
       params.workoutType ?? null,
@@ -95,18 +98,22 @@ export async function getSessionById(
   id: string
 ): Promise<WorkoutSession | null> {
   const db = await getDb();
+  const userId = getCurrentUserId();
+  if (!userId) return null;
   const row = await db.getFirstAsync<Record<string, unknown>>(
-    "SELECT * FROM sessions WHERE id = ?",
-    [id]
+    "SELECT * FROM sessions WHERE id = ? AND user_id = ?",
+    [id, userId]
   );
   return row ? rowToSession(row) : null;
 }
 
 export async function listSessions(limit = 50): Promise<WorkoutSession[]> {
   const db = await getDb();
+  const userId = getCurrentUserId();
+  if (!userId) return [];
   const rows = await db.getAllAsync<Record<string, unknown>>(
-    "SELECT * FROM sessions ORDER BY started_at DESC LIMIT ?",
-    [limit]
+    "SELECT * FROM sessions WHERE user_id = ? ORDER BY started_at DESC LIMIT ?",
+    [userId, limit]
   );
   return rows.map(rowToSession);
 }
@@ -218,21 +225,28 @@ export async function saveMarkdown(
 
 export async function getIncompleteSession(): Promise<WorkoutSession | null> {
   const db = await getDb();
+  const userId = getCurrentUserId();
+  if (!userId) return null;
   const row = await db.getFirstAsync<Record<string, unknown>>(
     `SELECT * FROM sessions
-     WHERE local_status IN ('recording', 'paused')
-     ORDER BY started_at DESC LIMIT 1`
+     WHERE user_id = ? AND local_status IN ('recording', 'paused')
+     ORDER BY started_at DESC LIMIT 1`,
+    [userId]
   );
   return row ? rowToSession(row) : null;
 }
 
 export async function getPendingUploadSessions(): Promise<WorkoutSession[]> {
   const db = await getDb();
+  const userId = getCurrentUserId();
+  if (!userId) return [];
   const rows = await db.getAllAsync<Record<string, unknown>>(
     `SELECT * FROM sessions
-     WHERE local_status = 'locally_complete'
+     WHERE user_id = ?
+       AND local_status = 'locally_complete'
        AND processing_mode != 'local_only'
-     ORDER BY started_at ASC`
+     ORDER BY started_at ASC`,
+    [userId]
   );
   return rows.map(rowToSession);
 }
@@ -242,13 +256,17 @@ export async function getPendingUploadSessions(): Promise<WorkoutSession[]> {
 // Re-running the sync worker for these pulls down the finished result.
 export async function getUnsyncedSessions(): Promise<WorkoutSession[]> {
   const db = await getDb();
+  const userId = getCurrentUserId();
+  if (!userId) return [];
   const rows = await db.getAllAsync<Record<string, unknown>>(
     `SELECT * FROM sessions
-     WHERE local_status IN ('syncing', 'locally_complete', 'awaiting_upload')
+     WHERE user_id = ?
+       AND local_status IN ('syncing', 'locally_complete', 'awaiting_upload')
        AND sync_status != 'synchronized'
        AND processing_mode != 'local_only'
      ORDER BY started_at DESC
-     LIMIT 20`
+     LIMIT 20`,
+    [userId]
   );
   return rows.map(rowToSession);
 }
@@ -323,20 +341,22 @@ export async function upsertSessionsFromServer(
 ): Promise<void> {
   const db = await getDb();
   const ts = now();
+  const currentUserId = requireCurrentUserId();
   for (const r of rows) {
     // INSERT OR IGNORE — local in-progress sessions are the source of truth
     await db.runAsync(
       `INSERT OR IGNORE INTO sessions
-        (id, started_at, ended_at, duration_seconds, timezone,
+        (id, user_id, started_at, ended_at, duration_seconds, timezone,
          workout_type, trainer_name, goals, processing_mode,
          audio_retention_policy, local_status, remote_status, sync_status,
          exercises, session_notes, technique_themes, accomplishments,
          improvement_areas, pain_observations, next_session_plan,
          overall_difficulty, energy_level, markdown_content,
          extraction_version, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         r.id,
+        r.user_id ?? currentUserId,
         r.started_at,
         r.ended_at ?? null,
         r.duration_seconds ?? null,
@@ -365,6 +385,14 @@ export async function upsertSessionsFromServer(
       ] as (string | number | boolean | null)[]
     );
   }
+}
+
+export async function claimLegacySessions(userId: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    "UPDATE sessions SET user_id = ?, updated_at = ? WHERE user_id = 'local'",
+    [userId, now()]
+  );
 }
 
 export async function deleteSession(id: string): Promise<void> {
