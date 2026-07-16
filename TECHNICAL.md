@@ -22,7 +22,7 @@ On session end, the whole file uploads **directly to Vercel Blob** via a presign
 ### Transcription & extraction (server)
 
 - **Groq Whisper** (`whisper-large-v3-turbo`) transcribes the uploaded audio. Groq caps files at 25 MB; an explicit size check surfaces a clear error before the request (overridable via `GROQ_MAX_AUDIO_BYTES`).
-- **Claude** reads the full transcript and extracts exercises, sets, reps, weights, technique cues, and trainer notes, then generates a compact Markdown summary. Runs via Next.js `after()` so the request returns fast while the pipeline finishes in the background.
+- **Claude** reads the transcript and extracts exercises, sets, reps, weights, technique cues, and trainer notes, then the server generates a compact Markdown summary. Long transcripts use 15-minute primary windows with 90 seconds of context from adjacent windows; context clarifies exercises crossing a boundary but is explicitly excluded from extracted evidence to prevent loss and double-counting. Runs via Next.js `after()` so the request returns fast while the pipeline finishes in the background.
 
 ### Sync model
 
