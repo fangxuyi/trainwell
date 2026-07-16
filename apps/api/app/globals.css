@@ -1,8 +1,17 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #070a11;
+  --surface: #101520;
+  --surface-elevated: #171d2a;
+  --surface-muted: #202736;
+  --border: #252d3d;
+  --foreground: #f5f7fa;
+  --muted: #9ca7b8;
+  --faint: #667085;
+  --accent: #c7f36b;
+  --accent-text: #101707;
+  --violet: #9b8afb;
 }
 
 @theme inline {
@@ -12,38 +21,98 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--background);
 }
 
 body {
-  background: var(--background);
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 8% -8%, rgba(199, 243, 107, 0.11), transparent 28rem),
+    radial-gradient(circle at 92% 12%, rgba(155, 138, 251, 0.09), transparent 25rem),
+    var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, sans-serif;
 }
 
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  content: "";
+  opacity: 0.2;
+  background-image: linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: linear-gradient(to bottom, black, transparent 75%);
+}
+
+::selection {
+  color: var(--accent-text);
+  background: var(--accent);
+}
+
+.portal-card {
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: linear-gradient(145deg, rgba(23, 29, 42, 0.94), rgba(16, 21, 32, 0.96));
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.2);
+}
+
+.portal-card-hover {
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.portal-card-hover:hover {
+  transform: translateY(-2px);
+  border-color: rgba(199, 243, 107, 0.34);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+}
+
+.eyebrow {
+  color: var(--accent);
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.page-title {
+  letter-spacing: -0.045em;
+}
+
+.subtle-divider {
+  border-color: rgba(148, 163, 184, 0.13);
+}
+
 /* Markdown prose styles for session summaries */
 .prose-sm h1, .prose-sm h2, .prose-sm h3 {
-  color: #f4f4f5;
-  font-weight: 600;
-  margin-top: 1.25rem;
-  margin-bottom: 0.5rem;
+  color: var(--foreground);
+  font-weight: 800;
+  margin-top: 1.5rem;
+  margin-bottom: 0.6rem;
 }
-.prose-sm h1 { font-size: 1.125rem; }
-.prose-sm h2 { font-size: 1rem; border-bottom: 1px solid #27272a; padding-bottom: 0.25rem; }
-.prose-sm h3 { font-size: 0.875rem; color: #a1a1aa; }
-.prose-sm p { margin-bottom: 0.75rem; }
-.prose-sm ul, .prose-sm ol { padding-left: 1.25rem; margin-bottom: 0.75rem; }
-.prose-sm li { margin-bottom: 0.25rem; }
-.prose-sm strong { color: #f4f4f5; font-weight: 600; }
+.prose-sm h1 { font-size: 1.2rem; }
+.prose-sm h2 { font-size: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.45rem; }
+.prose-sm h3 { font-size: 0.875rem; color: var(--muted); }
+.prose-sm p { margin-bottom: 0.8rem; }
+.prose-sm ul, .prose-sm ol { padding-left: 1.25rem; margin-bottom: 0.8rem; }
+.prose-sm li { margin-bottom: 0.3rem; }
+.prose-sm strong { color: var(--foreground); font-weight: 750; }
 .prose-sm code {
-  background: #27272a;
-  padding: 0.125rem 0.3rem;
-  border-radius: 0.25rem;
+  background: var(--surface-muted);
+  padding: 0.125rem 0.35rem;
+  border-radius: 0.35rem;
   font-family: var(--font-geist-mono), monospace;
   font-size: 0.8em;
 }
-.prose-sm hr { border-color: #27272a; margin: 1rem 0; }
+.prose-sm hr { border-color: var(--border); margin: 1rem 0; }
+
+@media (max-width: 640px) {
+  body::before {
+    background-size: 32px 32px;
+  }
+}
