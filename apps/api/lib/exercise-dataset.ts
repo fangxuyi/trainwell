@@ -1,6 +1,11 @@
-import type { ExerciseRecord, ExtractionOutput } from "@/lib/types";
+import type {
+  ExerciseRecord,
+  ExerciseReferenceMedia,
+  ExtractionOutput,
+} from "@/lib/types";
 
 interface DatasetExercise {
+  id?: string;
   name?: string;
   equipment?: string;
   target?: string;
@@ -8,11 +13,15 @@ interface DatasetExercise {
   category?: string;
   muscle_group?: string;
   secondary_muscles?: string[];
+  image?: string;
+  gif_url?: string;
+  attribution?: string;
 }
 
 const DATASET_URL =
   process.env.EXERCISE_DATASET_URL ??
   "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/data/exercises.json";
+const MEDIA_BASE_URL = process.env.EXERCISE_MEDIA_BASE_URL?.trim();
 const CACHE_TTL_MS = 60 * 60 * 1000;
 
 let cachedDataset: DatasetExercise[] | null = null;
@@ -123,7 +132,46 @@ async function getDataset(): Promise<DatasetExercise[]> {
   return cachedDataset;
 }
 
-function canonicalizeExercise(exercise: ExerciseRecord, dataset: DatasetExercise[]): ExerciseRecord {
+function resolveMediaUrl(path: string | undefined): string | undefined {
+  if (!MEDIA_BASE_URL || !path) return undefined;
+
+  try {
+    const base = new URL(MEDIA_BASE_URL.endsWith("/") ? MEDIA_BASE_URL : `${MEDIA_BASE_URL}/`);
+    const url = new URL(path.replace(/^\/+/, ""), base);
+    return url.protocol === "https:" ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function referenceMediaFor(
+  datasetExercise: DatasetExercise
+): ExerciseReferenceMedia | undefined {
+  const gifUrl = resolveMediaUrl(datasetExercise.gif_url);
+  const attribution = datasetExercise.attribution?.trim();
+  if (!datasetExercise.id || !gifUrl || !attribution) return undefined;
+
+  return {
+    datasetId: datasetExercise.id,
+    imageUrl: resolveMediaUrl(datasetExercise.image),
+    gifUrl,
+    attribution,
+  };
+}
+
+function matchExercise(
+  exercise: ExerciseRecord,
+  dataset: DatasetExercise[]
+): DatasetExercise | undefined {
+  const candidateNames = [exercise.canonicalName, ...exercise.spokenNames]
+    .map(normalize)
+    .filter(Boolean);
+  const exactMatches = dataset.filter(
+    (datasetExercise) =>
+      !!datasetExercise.name && candidateNames.includes(normalize(datasetExercise.name))
+  );
+  if (exactMatches.length === 1) return exactMatches[0];
+
   const matches = dataset
     .map((datasetExercise) => ({ datasetExercise, score: scoreCandidate(exercise, datasetExercise) }))
     .sort((left, right) => right.score - left.score);
@@ -135,18 +183,34 @@ function canonicalizeExercise(exercise: ExerciseRecord, dataset: DatasetExercise
     best.score < 0.8 ||
     (nextBest && best.score - nextBest.score < 0.08)
   ) {
-    return exercise;
+    return undefined;
   }
 
-  if (normalize(exercise.canonicalName) === normalize(best.datasetExercise.name)) {
-    return exercise;
-  }
+  return best.datasetExercise;
+}
+
+function canonicalizeExercise(exercise: ExerciseRecord, dataset: DatasetExercise[]): ExerciseRecord {
+  const datasetExercise = matchExercise(exercise, dataset);
+  if (!datasetExercise?.name) return exercise;
+
+  const sameName = normalize(exercise.canonicalName) === normalize(datasetExercise.name);
 
   return {
     ...exercise,
-    canonicalName: best.datasetExercise.name,
-    spokenNames: [...new Set([exercise.canonicalName, ...exercise.spokenNames])],
+    canonicalName: sameName ? exercise.canonicalName : datasetExercise.name,
+    spokenNames: sameName
+      ? exercise.spokenNames
+      : [...new Set([exercise.canonicalName, ...exercise.spokenNames])],
+    referenceMedia: referenceMediaFor(datasetExercise) ?? exercise.referenceMedia,
   };
+}
+
+export async function enrichExercisesWithMedia(
+  exercises: ExerciseRecord[]
+): Promise<ExerciseRecord[]> {
+  if (!MEDIA_BASE_URL || exercises.length === 0) return exercises;
+  const dataset = await getDataset();
+  return exercises.map((exercise) => canonicalizeExercise(exercise, dataset));
 }
 
 export async function canonicalizeExtraction(

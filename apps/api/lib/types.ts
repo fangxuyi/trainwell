@@ -150,6 +150,13 @@ export interface ExerciseSet {
   sourceSegmentIds: string[];
 }
 
+export interface ExerciseReferenceMedia {
+  datasetId: string;
+  imageUrl?: string;
+  gifUrl: string;
+  attribution: string;
+}
+
 export interface ExerciseRecord {
   id: string;
   canonicalName: string;
@@ -168,6 +175,7 @@ export interface ExerciseRecord {
   trainerNotes: SourcedNote[];
   painObservations: PainObservation[];
   progressionSuggestion?: SourcedNote;
+  referenceMedia?: ExerciseReferenceMedia;
   confidence: number;
 }
 

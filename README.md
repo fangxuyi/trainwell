@@ -26,10 +26,12 @@ The iPhone app is the primary experience. A companion web portal lets you revisi
 ### Get a structured workout recap
 
 - Exercise names, sets, reps, weights, equipment, and approximate exercise timing.
+- Optional on-demand movement previews for confidently matched exercises when a licensed media source is configured.
 - Personalized trainer cues and technique themes.
 - Accomplishments, improvement areas, pain or discomfort observations, and next-session suggestions.
 - Context-aware processing for long sessions so exercises crossing an AI processing boundary are less likely to be lost or counted twice.
 - Exercise-name normalization against a pinned public exercise dataset when a confident match exists.
+- Movement previews stay collapsed until requested, so reports remain readable and do not download every animation at once.
 
 ### Review and learn over time
 

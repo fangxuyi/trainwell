@@ -5,6 +5,8 @@ import {
   InsufficientCreditsError,
   reserveCreditsForSession,
 } from "@/lib/credits";
+import { enrichExercisesWithMedia } from "@/lib/exercise-dataset";
+import type { ExerciseRecord } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +19,23 @@ export async function GET() {
     WHERE user_id = ${userId}
     ORDER BY started_at DESC LIMIT 100
   `;
-  return NextResponse.json(rows);
+  const exerciseGroups = rows.map((session) =>
+    Array.isArray(session.exercises) ? (session.exercises as ExerciseRecord[]) : []
+  );
+  const enrichedExercises = await enrichExercisesWithMedia(exerciseGroups.flat()).catch(
+    (error) => {
+      console.warn("Exercise media enrichment failed", error);
+      return exerciseGroups.flat();
+    }
+  );
+  let exerciseOffset = 0;
+  const enrichedRows = rows.map((session, index) => {
+    const exerciseCount = exerciseGroups[index].length;
+    const exercises = enrichedExercises.slice(exerciseOffset, exerciseOffset + exerciseCount);
+    exerciseOffset += exerciseCount;
+    return { ...session, exercises };
+  });
+  return NextResponse.json(enrichedRows);
 }
 
 export async function POST(req: NextRequest) {

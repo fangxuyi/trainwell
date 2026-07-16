@@ -20,6 +20,7 @@ import { getAudioSegmentsBySession } from "../../src/db/audio";
 import { getNotesBySession } from "../../src/db/quickNotes";
 import { formatDuration } from "../../src/utils/time";
 import { deleteLocalAudio } from "../../src/storage/audioFiles";
+import { ExerciseMediaPreview } from "../../src/components/ExerciseMediaPreview";
 
 const SYNCING_STATUSES = new Set(["syncing", "locally_complete"]);
 
@@ -33,6 +34,7 @@ export default function SessionDetailScreen() {
   const [prevId, setPrevId] = useState<string | null>(null);
   const [nextId, setNextId] = useState<string | null>(null);
   const [recovering, setRecovering] = useState(false);
+  const [previewExerciseId, setPreviewExerciseId] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadAll = useCallback(async () => {
@@ -268,33 +270,56 @@ export default function SessionDetailScreen() {
         </View>
       </View>
 
+      {/* Exercises */}
+      {session.exercises && session.exercises.length > 0 && (
+        <View style={styles.card}>
+          <Text style={styles.cardEyebrow}>Movement breakdown</Text>
+          <Text style={styles.sectionTitle}>Exercises</Text>
+          {session.exercises.map((ex, i) => (
+            <View key={ex.id || String(i)} style={styles.exerciseRow}>
+              <View style={styles.exerciseHeader}>
+                <View style={styles.exerciseNumber}>
+                  <Text style={styles.exerciseNumberText}>
+                    {String(i + 1).padStart(2, "0")}
+                  </Text>
+                </View>
+                <View style={styles.exerciseBody}>
+                  <Text style={styles.exerciseName}>{ex.canonicalName}</Text>
+                  {ex.sets.length > 0 && (
+                    <Text style={styles.exerciseDetail}>
+                      {ex.sets.length} set{ex.sets.length !== 1 ? "s" : ""}
+                      {ex.sets[0]?.weight
+                        ? `  •  ${ex.sets[0].weight.value} ${ex.sets[0].weight.unit}`
+                        : ""}
+                    </Text>
+                  )}
+                </View>
+              </View>
+              {ex.techniqueNotes.length > 0 && (
+                <Text style={styles.exerciseCue}>{ex.techniqueNotes[0].text}</Text>
+              )}
+              {ex.referenceMedia && (
+                <ExerciseMediaPreview
+                  exerciseName={ex.canonicalName}
+                  media={ex.referenceMedia}
+                  expanded={previewExerciseId === (ex.id || String(i))}
+                  onToggle={() =>
+                    setPreviewExerciseId((current) =>
+                      current === (ex.id || String(i)) ? null : ex.id || String(i)
+                    )
+                  }
+                />
+              )}
+            </View>
+          ))}
+        </View>
+      )}
+
       {/* Compact workout summary */}
       {session.markdownContent && (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Summary</Text>
           <Text style={styles.summaryText}>{session.markdownContent}</Text>
-        </View>
-      )}
-
-      {/* Exercises */}
-      {session.exercises && session.exercises.length > 0 && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Exercises</Text>
-          {session.exercises.map((ex, i) => (
-            <View key={ex.id} style={styles.exerciseRow}>
-              <Text style={styles.exerciseName}>
-                {i + 1}. {ex.canonicalName}
-              </Text>
-              {ex.sets.length > 0 && (
-                <Text style={styles.exerciseDetail}>
-                  {ex.sets.length} set{ex.sets.length !== 1 ? "s" : ""}
-                  {ex.sets[0]?.weight
-                    ? ` × ${ex.sets[0].weight.value}${ex.sets[0].weight.unit}`
-                    : ""}
-                </Text>
-              )}
-            </View>
-          ))}
         </View>
       )}
 
@@ -414,6 +439,20 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     marginBottom: 10,
   },
+  cardEyebrow: {
+    color: "#C7F36B",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+  },
+  sectionTitle: {
+    color: "#F8FAFC",
+    fontSize: 20,
+    fontWeight: "800",
+    marginTop: 5,
+    marginBottom: 14,
+  },
   workoutType: {
     color: "#F1F5F9",
     fontSize: 22,
@@ -451,9 +490,36 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     fontFamily: "monospace",
   },
-  exerciseRow: { marginBottom: 8 },
-  exerciseName: { color: "#F1F5F9", fontSize: 15, fontWeight: "500" },
-  exerciseDetail: { color: "#64748B", fontSize: 13, marginTop: 2 },
+  exerciseRow: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.07)",
+    backgroundColor: "rgba(2, 6, 23, 0.34)",
+    padding: 13,
+    marginBottom: 10,
+  },
+  exerciseHeader: { flexDirection: "row", alignItems: "center", gap: 11 },
+  exerciseNumber: {
+    width: 36,
+    height: 36,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#293345",
+  },
+  exerciseNumberText: { color: "#C7F36B", fontSize: 11, fontWeight: "800" },
+  exerciseBody: { flex: 1 },
+  exerciseName: { color: "#F8FAFC", fontSize: 15, fontWeight: "700" },
+  exerciseDetail: { color: "#64748B", fontSize: 12, fontWeight: "600", marginTop: 3 },
+  exerciseCue: {
+    color: "#94A3B8",
+    fontSize: 12,
+    lineHeight: 18,
+    borderLeftWidth: 2,
+    borderLeftColor: "rgba(155, 138, 251, 0.55)",
+    paddingLeft: 10,
+    marginTop: 11,
+  },
   noteText: { color: "#CBD5E1", fontSize: 14, marginBottom: 4 },
   reviewButton: {
     backgroundColor: "#7C3AED",

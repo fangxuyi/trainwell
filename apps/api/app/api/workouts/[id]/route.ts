@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { getUserId, unauthorized } from "@/lib/auth";
 import { refundSessionCredits } from "@/lib/credits";
+import { enrichExercisesWithMedia } from "@/lib/exercise-dataset";
+import type { ExerciseRecord } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +21,15 @@ export async function GET(
   if (rows.length === 0) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
-  return NextResponse.json(rows[0]);
+  const session = rows[0];
+  const exercises = Array.isArray(session.exercises)
+    ? (session.exercises as ExerciseRecord[])
+    : [];
+  const enrichedExercises = await enrichExercisesWithMedia(exercises).catch((error) => {
+    console.warn("Exercise media enrichment failed", error);
+    return exercises;
+  });
+  return NextResponse.json({ ...session, exercises: enrichedExercises });
 }
 
 export async function DELETE(

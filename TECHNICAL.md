@@ -116,7 +116,7 @@ The pipeline makes the following model/service calls:
 1. **Transcription:** one Groq Whisper call for the current single audio file.
 2. **Structured extraction:** one call to the configured language-model provider for shorter sessions. Long sessions are divided into approximately 15-minute primary windows and extracted with parallel provider calls.
 3. **Boundary protection:** each long-session window receives up to 90 seconds of adjacent context. The prompt allows that context to identify continuity but explicitly prohibits extracting evidence from it, reducing lost or duplicated sets at boundaries.
-4. **Exercise canonicalization:** no LLM call. Extracted names are deterministically matched against a commit-pinned public GitHub exercise dataset. Low-confidence or ambiguous matches preserve the model’s original name. Dataset failures are non-fatal.
+4. **Exercise canonicalization and media matching:** no LLM call. Extracted names are deterministically matched against a commit-pinned public GitHub exercise dataset. Low-confidence or ambiguous matches preserve the model’s original name. When `EXERCISE_MEDIA_BASE_URL` is configured, confident matches also receive structured `referenceMedia` metadata resolved against that licensed HTTPS host. Dataset failures are non-fatal.
 5. **Summary:** no additional LLM call. `generateSummaryText()` deterministically formats the merged structured extraction into the compact workout recap.
 6. **Indexing:** one Voyage AI embeddings request batches the generated overview, exercise, and next-plan chunks for pgvector retrieval.
 
@@ -259,6 +259,7 @@ curl -X POST https://your-api.example/api/admin/backfill-embeddings \
 | `ADMIN_SECRET` | Protects database migration and backfill routes. |
 | `GROQ_MAX_AUDIO_BYTES` | Optional transcription file-size guard override. |
 | `EXERCISE_DATASET_URL` | Optional override for the pinned exercise reference dataset. |
+| `EXERCISE_MEDIA_BASE_URL` | Optional HTTPS base URL for separately licensed exercise thumbnails and GIFs. Keep unset unless the deployment has media usage rights. |
 | `NEXT_PUBLIC_API_URL` | Public deployed API URL exposed to the web client where needed. |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk public browser key. |
 | `CLERK_SECRET_KEY` | Clerk server key. |
@@ -317,6 +318,7 @@ Recording, background sync, upload, Live Activity, and RevenueCat changes requir
 - **Terminated-app upload is not guaranteed:** recovery is reliable while the app is active and upon reopening, but iOS does not guarantee that authenticated uploads run while the app is terminated.
 - **Extraction validation is incomplete:** malformed or structurally incomplete model JSON can still fail downstream processing.
 - **Window merge can retain rare duplicates:** adjacent context prevents double-counting from context evidence, but independently extracted primary windows can still identify one boundary-spanning exercise twice.
+- **Exercise media requires separate rights:** the pinned dataset's code and metadata license does not grant downstream use of its Gym visual images or GIFs. Interactive previews remain disabled until a licensed media base URL is configured; every rendered preview retains the dataset attribution.
 - **Ask AI citations are incomplete:** answers may name sessions in prose, but the structured `citations` array is empty.
 - **Live Activity display still needs confirmed device QA.**
 - **iOS billing is deferred:** StoreKit products, RevenueCat offerings, and Apple release credentials are not configured for production.

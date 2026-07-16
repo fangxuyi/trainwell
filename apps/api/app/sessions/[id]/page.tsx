@@ -4,6 +4,8 @@ import sql from "@/lib/db";
 import { marked } from "marked";
 import { auth } from "@clerk/nextjs/server";
 import type { ExerciseRecord } from "@/lib/types";
+import { enrichExercisesWithMedia } from "@/lib/exercise-dataset";
+import ExerciseList from "./ExerciseList";
 
 export const dynamic = "force-dynamic";
 
@@ -35,9 +37,13 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
   if (rows.length === 0) notFound();
   const session = rows[0];
   const date = new Date(session.started_at as string);
-  const exercises: ExerciseRecord[] = Array.isArray(session.exercises)
+  const storedExercises: ExerciseRecord[] = Array.isArray(session.exercises)
     ? (session.exercises as ExerciseRecord[])
     : [];
+  const exercises = await enrichExercisesWithMedia(storedExercises).catch((error) => {
+    console.warn("Exercise media enrichment failed", error);
+    return storedExercises;
+  });
   const markdownHtml = session.markdown_content
     ? await marked(session.markdown_content as string)
     : null;
@@ -86,33 +92,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
         <div className="space-y-5">
           {exercises.length > 0 && (
             <Section eyebrow="Movement breakdown" title="Exercises">
-              <div className="grid gap-2.5">
-                {exercises.map((exercise, index) => {
-                  const completedSets = exercise.sets.filter((set) => set.completed);
-                  const firstWeight = completedSets.find((set) => set.weight)?.weight;
-                  return (
-                    <div key={exercise.id || index} className="group flex gap-3 rounded-2xl border border-white/[0.07] bg-[#070A11]/45 p-3.5 transition hover:border-[#C7F36B]/20">
-                      <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-[#202736] text-xs font-black text-[#C7F36B]">
-                        {String(index + 1).padStart(2, "0")}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <h3 className="font-extrabold text-[#F5F7FA]">{exercise.canonicalName}</h3>
-                          <div className="flex items-center gap-2 text-[0.65rem] font-bold text-[#667085]">
-                            {completedSets.length > 0 && <span>{completedSets.length} set{completedSets.length === 1 ? "" : "s"}</span>}
-                            {firstWeight && <span className="rounded-full bg-white/[0.05] px-2 py-1 text-[#9CA7B8]">{firstWeight.value} {firstWeight.unit}</span>}
-                          </div>
-                        </div>
-                        {exercise.techniqueNotes.length > 0 && (
-                          <p className="mt-2 border-l-2 border-[#9B8AFB]/50 pl-3 text-xs leading-5 text-[#9CA7B8]">
-                            {exercise.techniqueNotes[0].text}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <ExerciseList exercises={exercises} />
             </Section>
           )}
 
