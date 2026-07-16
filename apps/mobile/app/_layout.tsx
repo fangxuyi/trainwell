@@ -2,10 +2,11 @@ import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import { AppState, View, ActivityIndicator } from "react-native";
+import * as Network from "expo-network";
 import { ClerkProvider, useAuth } from "@clerk/clerk-expo";
 import { getDb } from "../src/db/client";
 import * as Notifications from "expo-notifications";
-import { retryStalledSessions, reconcileUnsyncedSessions } from "../src/sync/worker";
+import { prepareLocalRecovery, runSyncRecovery } from "../src/sync/recovery";
 import { tokenCache } from "../src/auth/tokenCache";
 import { setTokenGetter } from "../src/auth/token";
 import { configureRevenueCat } from "../src/billing/revenueCat";
@@ -14,6 +15,7 @@ import { claimLegacySessions } from "../src/db/sessions";
 import { setCurrentUserId } from "../src/auth/currentUser";
 
 const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
+const FOREGROUND_RECOVERY_INTERVAL_MS = 30_000;
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -62,18 +64,39 @@ function RootNavigator() {
   }, [isSignedIn, userId]);
 
   useEffect(() => {
-    getDb().catch(console.error);
+    getDb().then(prepareLocalRecovery).catch(console.error);
+  }, []);
 
-    // When the app comes to the foreground, resume any interrupted sync and
-    // reconcile sessions the server finished while the app was backgrounded.
-    const sub = AppState.addEventListener("change", (state) => {
-      if (state === "active") {
-        retryStalledSessions().catch(console.error);
-        reconcileUnsyncedSessions().catch(console.error);
+  useEffect(() => {
+    if (!isSignedIn || !userId || preparedUserId !== userId) return;
+
+    const recoverIfOnline = async () => {
+      if (AppState.currentState !== "active") return;
+      const state = await Network.getNetworkStateAsync();
+      if (state.isConnected === false || state.isInternetReachable === false) return;
+      await runSyncRecovery();
+    };
+
+    recoverIfOnline().catch(console.error);
+
+    const appStateSubscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") recoverIfOnline().catch(console.error);
+    });
+    const networkSubscription = Network.addNetworkStateListener((state) => {
+      if (state.isConnected && state.isInternetReachable !== false) {
+        recoverIfOnline().catch(console.error);
       }
     });
-    return () => sub.remove();
-  }, []);
+    const recoveryInterval = setInterval(() => {
+      recoverIfOnline().catch(console.error);
+    }, FOREGROUND_RECOVERY_INTERVAL_MS);
+
+    return () => {
+      appStateSubscription.remove();
+      networkSubscription.remove();
+      clearInterval(recoveryInterval);
+    };
+  }, [isSignedIn, preparedUserId, userId]);
 
   // Route users to/from the auth screens based on sign-in state.
   useEffect(() => {

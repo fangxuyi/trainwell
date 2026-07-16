@@ -136,6 +136,31 @@ export async function getPendingJobsBySession(
   return rows.map(rowToJob);
 }
 
+export async function recoverInterruptedJobs(): Promise<void> {
+  const db = await getDb();
+  const ts = now();
+  await db.runAsync(
+    `UPDATE sync_jobs
+     SET status = 'retry_wait', next_attempt_at = ?,
+         last_error = 'App closed during sync', updated_at = ?
+     WHERE status = 'running'`,
+    [ts, ts]
+  );
+}
+
+export async function resetSessionJobsForRetry(sessionId: string): Promise<void> {
+  const db = await getDb();
+  const ts = now();
+  await db.runAsync(
+    `UPDATE sync_jobs
+     SET status = 'pending', attempt_count = 0, next_attempt_at = ?,
+         last_error = NULL, updated_at = ?
+     WHERE session_id = ?
+       AND status IN ('blocked', 'failed_permanently', 'retry_wait', 'running')`,
+    [ts, ts, sessionId]
+  );
+}
+
 export async function deleteCompletedJobs(
   olderThanDays = 7
 ): Promise<void> {

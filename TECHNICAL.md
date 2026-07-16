@@ -59,6 +59,8 @@ SQLite runs in WAL mode and contains:
 - `quick_notes` — timestamped notes captured during recording; currently local only.
 - `sync_jobs` — persistent network work with retries and backoff.
 
+Completed workout summaries and structured extraction data are cached in SQLite, not downloaded as standalone files. SQLite and session audio use the operating system's private app container, so uninstalling the app removes the local database and any remaining local recordings. Startup cleanup scans only session `audio` directories and removes physical recordings that no longer have a live `audio_segments` row; it does not remove cached workout summaries.
+
 Shared application types use camelCase. SQLite and Postgres rows use snake_case, with explicit conversions in database and API boundaries.
 
 ### Recording
@@ -83,7 +85,9 @@ The sync worker in `apps/mobile/src/sync/worker.ts` performs these steps:
 
 Network jobs use stable client-generated IDs and persistent SQLite rows. Retry delays are 5 seconds, 15 seconds, 1 minute, 5 minutes, and 15 minutes. HTTP 402 marks a job blocked so the local recording remains available after the user runs out of credits.
 
-On foreground, `retryStalledSessions()` retries due jobs and `reconcileUnsyncedSessions()` checks sessions whose server work may have completed while mobile was suspended. Processing is not re-triggered when the server already reports `processing`, `review_required`, or `finalized`.
+Recovery runs at authenticated startup, when the app returns to the foreground, when network access is restored, and every 30 seconds while the app remains active. Jobs left `running` by a terminated process return to the retry queue at startup, explicit retries reset blocked or permanently failed jobs, and a per-session lock prevents duplicate workers. `retryStalledSessions()` retries due jobs while `reconcileUnsyncedSessions()` checks sessions whose server work may have completed while mobile was suspended. Processing is not re-triggered when the server already reports `processing`, `review_required`, or `finalized`.
+
+After processing, the mobile cache copies the authoritative server `remote_status`. A `review_required` result exposes Review & Finalize; finalizing a session with `delete_after_review` deletes its physical local recording before marking it deleted. Deleting a session also completes remote deletion and physical local-audio deletion before removing the SQLite session row.
 
 ## API and web portal
 
@@ -303,14 +307,12 @@ Recording, background sync, upload, Live Activity, and RevenueCat changes requir
 ## Known limitations
 
 - **Hard-crash recording loss:** one continuous file is required for background reliability, but a hard app crash before recorder finalization can lose the in-progress file.
-- **Running sync jobs are not reset after restart:** `getDueJobs()` selects `pending` and `retry_wait`, not jobs left in `running` by a crash.
 - **Manual upload is not actually manual:** the UI exposes `manual_upload`, but the active-session hook currently queues and starts sync for every mode except `local_only`.
 - **Local-only sessions have no generated content:** there is no on-device transcription or extraction pipeline.
 - **Quick notes are local only:** timestamped notes are not uploaded or included in server extraction.
 - **Review edits do not sync to Postgres:** exercise corrections and finalization update SQLite only; there is no server PATCH flow.
-- **Permanent sync failures lack a true reset path:** retrying does not reset `failed_permanently` jobs to a runnable state.
 - **POST and DELETE calls have no timeout:** only the mobile GET helper currently uses an abort timeout.
-- **Foreground sync has no concurrency lock:** rapid app-state changes can start redundant workers, although server operations are designed to be idempotent.
+- **Terminated-app upload is not guaranteed:** recovery is reliable while the app is active and upon reopening, but iOS does not guarantee that authenticated uploads run while the app is terminated.
 - **Extraction validation is incomplete:** malformed or structurally incomplete model JSON can still fail downstream processing.
 - **Window merge can retain rare duplicates:** adjacent context prevents double-counting from context evidence, but independently extracted primary windows can still identify one boundary-spanning exercise twice.
 - **Ask AI citations are incomplete:** answers may name sessions in prose, but the structured `citations` array is empty.
