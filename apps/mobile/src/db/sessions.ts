@@ -3,6 +3,7 @@ import type {
   ProcessingMode,
   AudioRetentionPolicy,
   LocalStatus,
+  ExerciseRecord,
 } from "@trainwell/schemas";
 import { getDb } from "./client";
 import { now } from "../utils/time";
@@ -406,7 +407,58 @@ export async function upsertSessionsFromServer(
         currentUserId,
       ]
     );
+
+    const remoteExercises = parseExerciseRecords(r.exercises);
+    if (remoteExercises.some((exercise) => exercise.referenceMedia)) {
+      const localRow = await db.getFirstAsync<{ exercises: string | null }>(
+        "SELECT exercises FROM sessions WHERE id = ? AND user_id = ?",
+        [r.id as string, currentUserId]
+      );
+      const localExercises = parseExerciseRecords(localRow?.exercises);
+      const mergedExercises = mergeExerciseReferenceMedia(localExercises, remoteExercises);
+      if (mergedExercises) {
+        await db.runAsync(
+          `UPDATE sessions SET exercises = ?, updated_at = ?
+           WHERE id = ? AND user_id = ?
+             AND local_status NOT IN ('recording', 'paused', 'interrupted')`,
+          [JSON.stringify(mergedExercises), ts, r.id as string, currentUserId]
+        );
+      }
+    }
   }
+}
+
+function parseExerciseRecords(value: unknown): ExerciseRecord[] {
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) : value;
+    return Array.isArray(parsed) ? (parsed as ExerciseRecord[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function mergeExerciseReferenceMedia(
+  localExercises: ExerciseRecord[],
+  remoteExercises: ExerciseRecord[]
+): ExerciseRecord[] | null {
+  if (localExercises.length === 0) return null;
+
+  const mediaById = new Map(
+    remoteExercises
+      .filter((exercise) => exercise.referenceMedia)
+      .map((exercise) => [exercise.id, exercise.referenceMedia] as const)
+  );
+  let changed = false;
+  const merged = localExercises.map((exercise) => {
+    const referenceMedia = mediaById.get(exercise.id);
+    if (!referenceMedia) return exercise;
+    if (JSON.stringify(exercise.referenceMedia) === JSON.stringify(referenceMedia)) {
+      return exercise;
+    }
+    changed = true;
+    return { ...exercise, referenceMedia };
+  });
+  return changed ? merged : null;
 }
 
 export async function claimLegacySessions(userId: string): Promise<void> {

@@ -44,7 +44,8 @@
         }
       ],
       "expo-audio",
-      "./plugins/withLiveActivity"
+      "./plugins/withLiveActivity",
+      "expo-image"
     ],
     "experiments": {
       "typedRoutes": true
