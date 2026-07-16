@@ -315,6 +315,9 @@ export async function saveSyncResult(
       energy_level = ?,
       extraction_version = ?,
       markdown_content = ?,
+      remote_status = ?,
+      remote_version = ?,
+      summary_version = ?,
       updated_at = ?,
       local_version = local_version + 1
      WHERE id = ?`,
@@ -330,6 +333,9 @@ export async function saveSyncResult(
       (remote.energy_level as number | null) ?? null,
       (remote.extraction_version as string | null) ?? null,
       (remote.markdown_content as string | null) ?? null,
+      (remote.remote_status as string | null) ?? "review_required",
+      (remote.remote_version as number | null) ?? null,
+      (remote.summary_version as string | null) ?? null,
       ts,
       sessionId,
     ]
@@ -343,6 +349,8 @@ export async function upsertSessionsFromServer(
   const ts = now();
   const currentUserId = requireCurrentUserId();
   for (const r of rows) {
+    const remoteStatus = (r.remote_status as string | undefined) ?? "finalized";
+    const isReady = remoteStatus === "review_required" || remoteStatus === "finalized";
     // INSERT OR IGNORE — local in-progress sessions are the source of truth
     await db.runAsync(
       `INSERT OR IGNORE INTO sessions
@@ -366,9 +374,9 @@ export async function upsertSessionsFromServer(
         typeof r.goals === "string" ? r.goals : JSON.stringify(r.goals ?? []),
         r.processing_mode ?? "automatic_hybrid",
         r.audio_retention_policy ?? "delete_after_review",
-        r.local_status ?? "cached",
-        r.remote_status ?? "finalized",
-        r.sync_status ?? "synced",
+        isReady ? "cached" : (r.local_status ?? "locally_complete"),
+        remoteStatus,
+        isReady ? "synchronized" : (r.sync_status ?? "pending"),
         typeof r.exercises === "string" ? r.exercises : JSON.stringify(r.exercises ?? []),
         typeof r.session_notes === "string" ? r.session_notes : JSON.stringify(r.session_notes ?? []),
         typeof r.technique_themes === "string" ? r.technique_themes : JSON.stringify(r.technique_themes ?? []),
@@ -383,6 +391,20 @@ export async function upsertSessionsFromServer(
         r.created_at ?? ts,
         r.updated_at ?? ts,
       ] as (string | number | boolean | null)[]
+    );
+
+    await db.runAsync(
+      `UPDATE sessions SET remote_status = ?, remote_version = ?,
+         summary_version = COALESCE(?, summary_version)
+       WHERE id = ? AND user_id = ?
+         AND local_status NOT IN ('recording', 'paused')`,
+      [
+        remoteStatus,
+        (r.remote_version as number | null) ?? null,
+        (r.summary_version as string | null) ?? null,
+        r.id as string,
+        currentUserId,
+      ]
     );
   }
 }

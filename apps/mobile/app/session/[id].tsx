@@ -12,10 +12,11 @@ import { useCallback, useRef, useState } from "react";
 import type { WorkoutSession } from "@trainwell/schemas";
 import { getSessionById, deleteSession, listSessions } from "../../src/db/sessions";
 import { apiDelete } from "../../src/utils/api";
-import { runSyncWorker } from "../../src/sync/worker";
+import { retrySessionSync } from "../../src/sync/recovery";
 import { getAudioSegmentsBySession } from "../../src/db/audio";
 import { getNotesBySession } from "../../src/db/quickNotes";
 import { formatDuration } from "../../src/utils/time";
+import { deleteLocalAudio } from "../../src/storage/audioFiles";
 
 const SYNCING_STATUSES = new Set(["syncing", "locally_complete"]);
 
@@ -85,11 +86,14 @@ export default function SessionDetailScreen() {
           text: "Delete",
           style: "destructive",
           onPress: async () => {
-            await Promise.all([
-              deleteSession(id),
-              apiDelete(`/api/workouts/${id}`),
-            ]);
-            router.replace("/");
+            try {
+              await apiDelete(`/api/workouts/${id}`);
+              await deleteLocalAudio(id);
+              await deleteSession(id);
+              router.replace("/");
+            } catch (error) {
+              Alert.alert("Could not delete session", (error as Error).message);
+            }
           },
         },
       ]
@@ -309,9 +313,14 @@ export default function SessionDetailScreen() {
           </Text>
           <TouchableOpacity
             style={styles.retryButton}
-            onPress={() => {
-              runSyncWorker(id).catch(console.error);
-              loadAll();
+            onPress={async () => {
+              try {
+                await retrySessionSync(id);
+              } catch (error) {
+                Alert.alert("Retry failed", (error as Error).message);
+              } finally {
+                await loadAll();
+              }
             }}
           >
             <Text style={styles.retryButtonText}>Retry Sync</Text>

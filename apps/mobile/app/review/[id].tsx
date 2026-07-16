@@ -12,7 +12,7 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import type { WorkoutSession, ExerciseRecord } from "@trainwell/schemas";
 import { getSessionById, saveExerciseEdits, finalizeSession } from "../../src/db/sessions";
-import { deleteLocalAudio } from "../../src/sync/worker";
+import { deleteLocalAudio } from "../../src/storage/audioFiles";
 
 export default function ReviewScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();

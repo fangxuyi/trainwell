@@ -1,5 +1,4 @@
 import type { SyncJob } from "@trainwell/schemas";
-import { File } from "expo-file-system";
 import {
   getPendingJobsBySession,
   getDueJobs,
@@ -10,9 +9,7 @@ import {
 } from "../db/syncJobs";
 import {
   getAudioSegmentById,
-  getAudioSegmentsBySession,
   markSegmentUploaded,
-  markSegmentDeleted,
 } from "../db/audio";
 import { ApiError, apiPost, apiGet, uploadAudioChunk } from "../utils/api";
 import {
@@ -21,11 +18,24 @@ import {
   saveSyncResult,
   getUnsyncedSessions,
 } from "../db/sessions";
+import { deleteLocalAudio } from "../storage/audioFiles";
 
 const POLL_INTERVAL_MS = 5000;
 const MAX_POLL_ATTEMPTS = 60; // 5 minutes
+const activeWorkers = new Map<string, Promise<void>>();
 
-export async function runSyncWorker(sessionId: string): Promise<void> {
+export function runSyncWorker(sessionId: string): Promise<void> {
+  const activeWorker = activeWorkers.get(sessionId);
+  if (activeWorker) return activeWorker;
+
+  const worker = runSyncWorkerInternal(sessionId).finally(() => {
+    activeWorkers.delete(sessionId);
+  });
+  activeWorkers.set(sessionId, worker);
+  return worker;
+}
+
+async function runSyncWorkerInternal(sessionId: string): Promise<void> {
   // Skip sessions that haven't been stopped yet — create_remote_session hasn't
   // been enqueued and the server session doesn't exist, so chunk uploads would
   // fail with a FK violation.
@@ -130,7 +140,11 @@ export async function retryStalledSessions(): Promise<void> {
   const due = await getDueJobs();
   const sessionIds = [...new Set(due.map((j) => j.sessionId))];
   for (const sessionId of sessionIds) {
-    runSyncWorker(sessionId).catch(console.error);
+    try {
+      await runSyncWorker(sessionId);
+    } catch (error) {
+      console.error("[SyncRecovery] Retry failed for session", sessionId, error);
+    }
   }
 }
 
@@ -143,7 +157,11 @@ export async function retryStalledSessions(): Promise<void> {
 export async function reconcileUnsyncedSessions(): Promise<void> {
   const sessions = await getUnsyncedSessions();
   for (const session of sessions) {
-    runSyncWorker(session.id).catch(console.error);
+    try {
+      await runSyncWorker(session.id);
+    } catch (error) {
+      console.error("[SyncRecovery] Reconciliation failed for session", session.id, error);
+    }
   }
 }
 
@@ -196,20 +214,6 @@ async function handleUploadAudioChunk(job: SyncJob): Promise<void> {
   );
 
   await markSegmentUploaded(segment.id, blobUrl ?? "");
-}
-
-export async function deleteLocalAudio(sessionId: string): Promise<void> {
-  const segments = await getAudioSegmentsBySession(sessionId);
-  for (const seg of segments) {
-    if (seg.localStatus === "deleted" || !seg.localPath) continue;
-    try {
-      const file = new File(seg.localPath);
-      if (file.exists) file.delete();
-      await markSegmentDeleted(seg.id);
-    } catch (err) {
-      console.warn("[SyncWorker] Failed to delete audio file", seg.localPath, err);
-    }
-  }
 }
 
 function sleep(ms: number): Promise<void> {
