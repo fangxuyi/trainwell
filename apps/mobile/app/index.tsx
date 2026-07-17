@@ -18,31 +18,15 @@ import {
 } from "../src/db/sessions";
 import { recorder } from "../src/recording/recorder";
 import { AccountDrawer } from "../src/ui/AccountDrawer";
+import { SessionListItem } from "../src/ui/SessionListItem";
 import { colors, radii } from "../src/ui/theme";
 import { apiGet } from "../src/utils/api";
-import { formatDuration } from "../src/utils/time";
 
 function greeting(): string {
   const hour = new Date().getHours();
   if (hour < 12) return "Good morning";
   if (hour < 18) return "Good afternoon";
   return "Good evening";
-}
-
-function statusPresentation(session: WorkoutSession): { label: string; color: string } {
-  if (session.localStatus === "interrupted") {
-    return { label: "Recording interrupted", color: colors.warning };
-  }
-  if (session.localStatus === "local_error" || session.remoteStatus === "failed") {
-    return { label: "Needs attention", color: colors.danger };
-  }
-  if (session.localStatus === "syncing" || session.remoteStatus === "processing") {
-    return { label: "Processing", color: colors.warning };
-  }
-  if (session.localStatus === "cached" || session.syncStatus === "synchronized") {
-    return { label: "Ready", color: colors.success };
-  }
-  return { label: "Saved locally", color: colors.blue };
 }
 
 export default function HomeScreen() {
@@ -115,7 +99,12 @@ export default function HomeScreen() {
       <FlatList
         data={sessions}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <SessionCard session={item} onPress={() => router.push(`/session/${item.id}`)} />}
+        renderItem={({ item }) => (
+          <SessionListItem
+            session={item}
+            onPress={() => router.push(`/session/${item.id}`)}
+          />
+        )}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
         ListHeaderComponent={
@@ -209,34 +198,6 @@ export default function HomeScreen() {
         }
       />
     </SafeAreaView>
-  );
-}
-
-function SessionCard({ session, onPress }: { session: WorkoutSession; onPress: () => void }) {
-  const date = new Date(session.startedAt);
-  const status = statusPresentation(session);
-  return (
-    <TouchableOpacity style={styles.sessionCard} onPress={onPress}>
-      <View style={styles.dateTile}>
-        <Text style={styles.dateMonth}>
-          {date.toLocaleDateString("en-US", { month: "short" }).toUpperCase()}
-        </Text>
-        <Text style={styles.dateDay}>{date.getDate()}</Text>
-      </View>
-      <View style={styles.sessionContent}>
-        <Text style={styles.sessionType} numberOfLines={1}>{session.workoutType || "Training session"}</Text>
-        <Text style={styles.sessionMeta} numberOfLines={1}>
-          {[session.trainerName ? `with ${session.trainerName}` : null, session.durationSeconds ? formatDuration(session.durationSeconds) : null]
-            .filter(Boolean)
-            .join("  ·  ") || "Workout captured"}
-        </Text>
-        <View style={styles.statusRow}>
-          <View style={[styles.statusDot, { backgroundColor: status.color }]} />
-          <Text style={[styles.sessionStatus, { color: status.color }]}>{status.label}</Text>
-        </View>
-      </View>
-      <Text style={styles.sessionArrow}>›</Text>
-    </TouchableOpacity>
   );
 }
 
@@ -379,34 +340,6 @@ const styles = StyleSheet.create({
   sectionEyebrow: { color: colors.textFaint, fontSize: 9, fontWeight: "900", letterSpacing: 1.4 },
   sectionTitle: { color: colors.text, fontSize: 24, fontWeight: "900", letterSpacing: -0.6, marginTop: 4 },
   seeAll: { color: colors.accent, fontSize: 12, fontWeight: "800", paddingBottom: 3 },
-  sessionCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.medium,
-    padding: 13,
-    marginBottom: 10,
-  },
-  dateTile: {
-    width: 52,
-    height: 62,
-    borderRadius: 14,
-    backgroundColor: colors.surfaceMuted,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 13,
-  },
-  dateMonth: { color: colors.accent, fontSize: 9, fontWeight: "900", letterSpacing: 1 },
-  dateDay: { color: colors.text, fontSize: 22, fontWeight: "900", marginTop: 1 },
-  sessionContent: { flex: 1 },
-  sessionType: { color: colors.text, fontSize: 15, fontWeight: "800" },
-  sessionMeta: { color: colors.textMuted, fontSize: 11, marginTop: 4 },
-  statusRow: { flexDirection: "row", alignItems: "center", marginTop: 7 },
-  statusDot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
-  sessionStatus: { fontSize: 10, fontWeight: "800" },
-  sessionArrow: { color: colors.textFaint, fontSize: 24, fontWeight: "300", marginLeft: 8 },
   loader: { marginTop: 28 },
   emptyCard: {
     minHeight: 150,
