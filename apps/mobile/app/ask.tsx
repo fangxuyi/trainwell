@@ -1,15 +1,19 @@
+import { useRef, useState } from "react";
 import {
-  View,
+  ActivityIndicator,
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  FlatList,
-  StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  ActivityIndicator,
+  View,
 } from "react-native";
-import { useState, useRef } from "react";
+import { useRouter } from "expo-router";
+import { ScreenHeader } from "../src/ui/ScreenHeader";
+import { colors, radii } from "../src/ui/theme";
 import { apiPost } from "../src/utils/api";
 
 interface Message {
@@ -18,186 +22,234 @@ interface Message {
   text: string;
 }
 
+const STARTER_QUESTIONS = [
+  "What did I improve recently?",
+  "Which trainer cues come up most?",
+  "How has my squat progressed?",
+];
+
 export default function AskScreen() {
+  const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const listRef = useRef<FlatList>(null);
+  const listRef = useRef<FlatList<Message>>(null);
 
   const send = async () => {
     const question = input.trim();
     if (!question || loading) return;
 
-    const userMsg: Message = { id: Date.now().toString(), role: "user", text: question };
-    setMessages((prev) => [...prev, userMsg]);
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: "user",
+      text: question,
+    };
+    setMessages((previous) => [...previous, userMessage]);
     setInput("");
     setLoading(true);
 
     try {
-      const res = await apiPost<{ answer: string }>("/api/assistant", { question });
-      const aiMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        text: res.answer,
-      };
-      setMessages((prev) => [...prev, aiMsg]);
-    } catch (err) {
-      const errMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        text: "Sorry, couldn't reach the server. Check your connection and try again.",
-      };
-      setMessages((prev) => [...prev, errMsg]);
+      const response = await apiPost<{ answer: string }>("/api/assistant", { question });
+      setMessages((previous) => [
+        ...previous,
+        {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          text: response.answer,
+        },
+      ]);
+    } catch {
+      setMessages((previous) => [
+        ...previous,
+        {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          text: "I couldn’t reach your training history. Check your connection and try again.",
+        },
+      ]);
     } finally {
       setLoading(false);
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
     }
   };
 
-  const renderItem = ({ item }: { item: Message }) => (
-    <View
-      style={[
-        styles.bubble,
-        item.role === "user" ? styles.userBubble : styles.aiBubble,
-      ]}
-    >
-      <Text style={item.role === "user" ? styles.userText : styles.aiText}>
-        {item.text}
-      </Text>
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <KeyboardAvoidingView
+        style={styles.keyboardView}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <FlatList
+          ref={listRef}
+          data={messages}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => <MessageBubble message={item} />}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.listContent}
+          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+          ListHeaderComponent={
+            <>
+              <ScreenHeader
+                eyebrow="TRAINING INTELLIGENCE"
+                title="Ask your history."
+                subtitle="Turn every recorded session into answers you can use in the next one."
+                onBack={() => router.back()}
+              />
+              {messages.length === 0 && (
+                <EmptyConversation onSelect={setInput} />
+              )}
+            </>
+          }
+          ListFooterComponent={
+            loading ? (
+              <View style={styles.thinkingCard}>
+                <View style={styles.aiMark}>
+                  <Text style={styles.aiMarkText}>✦</Text>
+                </View>
+                <ActivityIndicator size="small" color={colors.violet} />
+                <Text style={styles.thinkingText}>Reading your training history…</Text>
+              </View>
+            ) : null
+          }
+        />
+
+        <View style={styles.composerShell}>
+          <View style={styles.composer}>
+            <TextInput
+              style={styles.input}
+              value={input}
+              onChangeText={setInput}
+              placeholder="Ask about your workouts…"
+              placeholderTextColor={colors.textFaint}
+              multiline
+              returnKeyType="send"
+              onSubmitEditing={send}
+              blurOnSubmit
+            />
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Send question"
+              style={[styles.sendButton, (!input.trim() || loading) && styles.sendDisabled]}
+              onPress={send}
+              disabled={!input.trim() || loading}
+            >
+              <Text style={styles.sendText}>↑</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.composerHint}>Answers are grounded in your recorded sessions.</Text>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+function EmptyConversation({ onSelect }: { onSelect: (question: string) => void }) {
+  return (
+    <View style={styles.emptyContainer}>
+      <View style={styles.intelligenceCard}>
+        <View style={styles.intelligenceOrb} />
+        <Text style={styles.spark}>✦</Text>
+        <Text style={styles.intelligenceEyebrow}>YOUR SESSIONS, CONNECTED</Text>
+        <Text style={styles.intelligenceTitle}>Find the signal in your training.</Text>
+        <Text style={styles.intelligenceBody}>
+          Ask about exercises, progress, coaching cues, or patterns across time.
+        </Text>
+      </View>
+
+      <Text style={styles.promptEyebrow}>TRY A QUESTION</Text>
+      {STARTER_QUESTIONS.map((question) => (
+        <TouchableOpacity
+          key={question}
+          style={styles.promptCard}
+          onPress={() => onSelect(question)}
+        >
+          <Text style={styles.promptText}>{question}</Text>
+          <Text style={styles.promptArrow}>→</Text>
+        </TouchableOpacity>
+      ))}
     </View>
   );
+}
 
+function MessageBubble({ message }: { message: Message }) {
+  const fromUser = message.role === "user";
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={90}
-    >
-      {messages.length === 0 && (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyTitle}>Ask about your workouts</Text>
-          <Text style={styles.emptyHint}>
-            "What exercises did I do last session?"{"\n"}
-            "How has my squat weight changed?"{"\n"}
-            "What cues did my trainer give me?"
-          </Text>
-        </View>
-      )}
-
-      <FlatList
-        ref={listRef}
-        data={messages}
-        keyExtractor={(item) => item.id}
-        renderItem={renderItem}
-        contentContainerStyle={styles.list}
-        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
-      />
-
-      {loading && (
-        <View style={styles.thinkingRow}>
-          <ActivityIndicator size="small" color="#38BDF8" />
-          <Text style={styles.thinkingText}>Thinking...</Text>
-        </View>
-      )}
-
-      <View style={styles.inputRow}>
-        <TextInput
-          style={styles.input}
-          value={input}
-          onChangeText={setInput}
-          placeholder="Ask anything about your workouts..."
-          placeholderTextColor="#475569"
-          multiline
-          returnKeyType="send"
-          onSubmitEditing={send}
-          blurOnSubmit
-        />
-        <TouchableOpacity
-          style={[styles.sendButton, (!input.trim() || loading) && styles.sendDisabled]}
-          onPress={send}
-          disabled={!input.trim() || loading}
-        >
-          <Text style={styles.sendText}>Send</Text>
-        </TouchableOpacity>
+    <View style={[styles.messageGroup, fromUser && styles.userMessageGroup]}>
+      <Text style={[styles.messageLabel, fromUser && styles.userMessageLabel]}>
+        {fromUser ? "YOU" : "TRAINWELL"}
+      </Text>
+      <View style={[styles.bubble, fromUser ? styles.userBubble : styles.aiBubble]}>
+        <Text style={[styles.messageText, fromUser && styles.userMessageText]}>
+          {message.text}
+        </Text>
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0F172A" },
-  list: { padding: 16, paddingBottom: 8, flexGrow: 1, justifyContent: "flex-end" },
-  emptyState: {
+  safeArea: { flex: 1, backgroundColor: colors.background },
+  keyboardView: { flex: 1 },
+  listContent: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 20, flexGrow: 1 },
+  emptyContainer: { paddingBottom: 14 },
+  intelligenceCard: {
+    minHeight: 245,
+    borderRadius: 28,
+    backgroundColor: colors.violetDark,
+    borderWidth: 1,
+    borderColor: "rgba(155, 138, 251, 0.2)",
+    padding: 22,
+    overflow: "hidden",
+    marginBottom: 27,
+  },
+  intelligenceOrb: {
     position: "absolute",
-    top: 0, left: 0, right: 0, bottom: 80,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 32,
+    width: 190,
+    height: 190,
+    borderRadius: 95,
+    borderWidth: 34,
+    borderColor: "rgba(155, 138, 251, 0.06)",
+    right: -55,
+    top: -58,
   },
-  emptyTitle: {
-    color: "#94A3B8",
-    fontSize: 18,
-    fontWeight: "600",
-    marginBottom: 16,
-    textAlign: "center",
-  },
-  emptyHint: {
-    color: "#475569",
-    fontSize: 14,
-    lineHeight: 24,
-    textAlign: "center",
-  },
-  bubble: {
-    maxWidth: "85%",
-    borderRadius: 16,
-    padding: 12,
-    marginBottom: 10,
-  },
-  userBubble: {
-    backgroundColor: "#2563EB",
-    alignSelf: "flex-end",
-    borderBottomRightRadius: 4,
-  },
-  aiBubble: {
-    backgroundColor: "#1E293B",
-    alignSelf: "flex-start",
-    borderBottomLeftRadius: 4,
-  },
-  userText: { color: "#fff", fontSize: 15, lineHeight: 21 },
-  aiText: { color: "#CBD5E1", fontSize: 15, lineHeight: 21 },
-  thinkingRow: {
+  spark: { color: colors.violet, fontSize: 28 },
+  intelligenceEyebrow: { color: colors.violet, fontSize: 9, fontWeight: "900", letterSpacing: 1.25, marginTop: 24 },
+  intelligenceTitle: { color: colors.text, fontSize: 26, lineHeight: 29, fontWeight: "900", letterSpacing: -0.7, marginTop: 8, maxWidth: 280 },
+  intelligenceBody: { color: "#ACA4D7", fontSize: 12, lineHeight: 18, marginTop: 12, maxWidth: 290 },
+  promptEyebrow: { color: colors.textFaint, fontSize: 9, fontWeight: "900", letterSpacing: 1.4, marginBottom: 10 },
+  promptCard: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
+    minHeight: 58,
+    borderRadius: radii.medium,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
     paddingHorizontal: 16,
-    paddingBottom: 8,
-    gap: 8,
+    marginBottom: 9,
   },
-  thinkingText: { color: "#475569", fontSize: 13 },
-  inputRow: {
-    flexDirection: "row",
-    padding: 12,
-    gap: 10,
-    borderTopWidth: 1,
-    borderTopColor: "#1E293B",
-    alignItems: "flex-end",
-  },
-  input: {
-    flex: 1,
-    backgroundColor: "#1E293B",
-    borderRadius: 12,
-    color: "#F1F5F9",
-    fontSize: 15,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    maxHeight: 100,
-  },
-  sendButton: {
-    backgroundColor: "#2563EB",
-    borderRadius: 12,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    justifyContent: "center",
-  },
-  sendDisabled: { backgroundColor: "#1E3A6E", opacity: 0.5 },
-  sendText: { color: "#fff", fontWeight: "700", fontSize: 15 },
+  promptText: { color: colors.text, fontSize: 13, fontWeight: "700", flex: 1, paddingRight: 12 },
+  promptArrow: { color: colors.accent, fontSize: 18 },
+  messageGroup: { alignSelf: "flex-start", maxWidth: "88%", marginBottom: 17 },
+  userMessageGroup: { alignSelf: "flex-end", alignItems: "flex-end" },
+  messageLabel: { color: colors.violet, fontSize: 8, fontWeight: "900", letterSpacing: 1.2, marginBottom: 6, marginLeft: 4 },
+  userMessageLabel: { color: colors.accent, marginLeft: 0, marginRight: 4 },
+  bubble: { borderRadius: 20, paddingHorizontal: 15, paddingVertical: 13 },
+  aiBubble: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderTopLeftRadius: 6 },
+  userBubble: { backgroundColor: colors.accent, borderBottomRightRadius: 6 },
+  messageText: { color: colors.text, fontSize: 14, lineHeight: 21 },
+  userMessageText: { color: colors.accentText, fontWeight: "600" },
+  thinkingCard: { flexDirection: "row", alignItems: "center", gap: 9, marginBottom: 8 },
+  aiMark: { width: 28, height: 28, borderRadius: 10, backgroundColor: colors.violetDark, alignItems: "center", justifyContent: "center" },
+  aiMarkText: { color: colors.violet, fontSize: 13 },
+  thinkingText: { color: colors.textMuted, fontSize: 11 },
+  composerShell: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 8, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.background },
+  composer: { flexDirection: "row", alignItems: "flex-end", gap: 9, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 20, padding: 7 },
+  input: { flex: 1, color: colors.text, fontSize: 14, lineHeight: 20, minHeight: 43, maxHeight: 112, paddingHorizontal: 10, paddingVertical: 10 },
+  sendButton: { width: 43, height: 43, borderRadius: 16, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
+  sendDisabled: { backgroundColor: colors.surfaceMuted, opacity: 0.55 },
+  sendText: { color: colors.accentText, fontSize: 21, lineHeight: 23, fontWeight: "900" },
+  composerHint: { color: colors.textFaint, fontSize: 9, textAlign: "center", marginTop: 7 },
 });

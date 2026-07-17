@@ -1,26 +1,29 @@
+import type { WorkoutSession } from "@trainwell/schemas";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import {
-  View,
-  Text,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
   ActivityIndicator,
   Alert,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
-import { useCallback, useRef, useState } from "react";
-import type { WorkoutSession } from "@trainwell/schemas";
-import { getSessionById, deleteSession, listSessions } from "../../src/db/sessions";
-import { apiDelete } from "../../src/utils/api";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { ExerciseMediaPreview } from "../../src/components/ExerciseMediaPreview";
+import { getNotesBySession } from "../../src/db/quickNotes";
+import { deleteSession, getSessionById } from "../../src/db/sessions";
+import { deleteLocalAudio } from "../../src/storage/audioFiles";
 import {
   processInterruptedRecording,
   retrySessionSync,
 } from "../../src/sync/recovery";
-import { getAudioSegmentsBySession } from "../../src/db/audio";
-import { getNotesBySession } from "../../src/db/quickNotes";
+import { HeaderAction, ScreenHeader } from "../../src/ui/ScreenHeader";
+import { sessionStatusPresentation } from "../../src/ui/sessionPresentation";
+import { colors, radii } from "../../src/ui/theme";
+import { apiDelete } from "../../src/utils/api";
 import { formatDuration } from "../../src/utils/time";
-import { deleteLocalAudio } from "../../src/storage/audioFiles";
-import { ExerciseMediaPreview } from "../../src/components/ExerciseMediaPreview";
 
 const SYNCING_STATUSES = new Set(["syncing", "locally_complete"]);
 
@@ -29,38 +32,26 @@ export default function SessionDetailScreen() {
   const router = useRouter();
   const [session, setSession] = useState<WorkoutSession | null>(null);
   const [loading, setLoading] = useState(true);
-  const [audioCount, setAudioCount] = useState(0);
   const [noteCount, setNoteCount] = useState(0);
-  const [prevId, setPrevId] = useState<string | null>(null);
-  const [nextId, setNextId] = useState<string | null>(null);
   const [recovering, setRecovering] = useState(false);
   const [previewExerciseId, setPreviewExerciseId] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadAll = useCallback(async () => {
-    const [s, segs, notes, all] = await Promise.all([
+    const [currentSession, notes] = await Promise.all([
       getSessionById(id),
-      getAudioSegmentsBySession(id),
       getNotesBySession(id),
-      listSessions(200),
     ]);
-    setSession(s);
-    setAudioCount(segs.length);
+    setSession(currentSession);
     setNoteCount(notes.length);
     setLoading(false);
-
-    const idx = all.findIndex((x) => x.id === id);
-    // listSessions returns newest-first; "previous" = older = higher index
-    setPrevId(idx < all.length - 1 ? all[idx + 1].id : null);
-    setNextId(idx > 0 ? all[idx - 1].id : null);
-
-    return s;
+    return currentSession;
   }, [id]);
 
   useFocusEffect(
     useCallback(() => {
-      loadAll().then((s) => {
-        if (s && SYNCING_STATUSES.has(s.localStatus)) {
+      loadAll().then((currentSession) => {
+        if (currentSession && SYNCING_STATUSES.has(currentSession.localStatus)) {
           pollRef.current = setInterval(async () => {
             const refreshed = await getSessionById(id);
             if (!refreshed) return;
@@ -85,7 +76,7 @@ export default function SessionDetailScreen() {
   const handleDelete = () => {
     Alert.alert(
       "Delete Session",
-      "This will permanently delete this session and all local audio. This cannot be undone.",
+      "This permanently deletes the session and all local audio. This cannot be undone.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -108,469 +99,389 @@ export default function SessionDetailScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.container, styles.center]}>
-        <ActivityIndicator color="#38BDF8" />
-      </View>
+      <SafeAreaView style={[styles.safeArea, styles.center]}>
+        <ActivityIndicator color={colors.accent} />
+      </SafeAreaView>
     );
   }
 
   if (!session) {
     return (
-      <View style={[styles.container, styles.center]}>
+      <SafeAreaView style={[styles.safeArea, styles.center]}>
         <Text style={styles.errorText}>Session not found.</Text>
-      </View>
+        <TouchableOpacity style={styles.returnButton} onPress={() => router.replace("/")}>
+          <Text style={styles.returnButtonText}>Return home</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
     );
   }
 
+  const status = sessionStatusPresentation(session);
   const isSyncing = SYNCING_STATUSES.has(session.localStatus);
-
-  const statusColor: Record<string, string> = {
-    locally_complete: "#F59E0B",
-    awaiting_upload: "#F59E0B",
-    syncing: "#38BDF8",
-    cached: "#38BDF8",
-    review_required: "#A78BFA",
-    finalized: "#34D399",
-    recording: "#EF4444",
-    paused: "#F59E0B",
-    interrupted: "#F59E0B",
-    draft: "#64748B",
-    local_error: "#EF4444",
-  };
+  const date = new Date(session.startedAt);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
-      {/* Session navigation */}
-      <View style={styles.navRow}>
-        <TouchableOpacity
-          style={[styles.navButton, !prevId && styles.navButtonDisabled]}
-          disabled={!prevId}
-          onPress={() => prevId && router.replace(`/session/${prevId}`)}
-        >
-          <Text style={[styles.navButtonText, !prevId && styles.navButtonTextDisabled]}>
-            ‹ Older
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.navButton}
-          onPress={() => router.push("/history")}
-        >
-          <Text style={styles.navButtonText}>All Sessions</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.navButton, !nextId && styles.navButtonDisabled]}
-          disabled={!nextId}
-          onPress={() => nextId && router.replace(`/session/${nextId}`)}
-        >
-          <Text style={[styles.navButtonText, !nextId && styles.navButtonTextDisabled]}>
-            Newer ›
-          </Text>
-        </TouchableOpacity>
-      </View>
-      {/* Header */}
-      <View style={styles.card}>
-        <Text style={styles.workoutType}>
-          {session.workoutType ?? "Workout"}
-        </Text>
-        <View
-          style={[
-            styles.statusBadge,
-            { backgroundColor: (statusColor[session.localStatus] ?? "#64748B") + "22" },
-          ]}
-        >
-          <Text
-            style={[
-              styles.statusBadgeText,
-              { color: statusColor[session.localStatus] ?? "#64748B" },
-            ]}
-          >
-            {session.localStatus.replace(/_/g, " ")}
-          </Text>
-        </View>
-
-        <Text style={styles.date}>
-          {new Date(session.startedAt).toLocaleDateString("en-US", {
+    <SafeAreaView style={styles.safeArea}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        <ScreenHeader
+          eyebrow="SESSION RECAP"
+          title={session.workoutType ?? "Training session"}
+          subtitle={date.toLocaleDateString("en-US", {
             weekday: "long",
-            year: "numeric",
             month: "long",
             day: "numeric",
+            year: "numeric",
           })}
-        </Text>
+          onBack={() => router.back()}
+          action={<HeaderAction label="History" onPress={() => router.push("/history")} />}
+        />
 
-        {session.durationSeconds ? (
-          <Text style={styles.duration}>
-            Duration: {formatDuration(session.durationSeconds)}
-          </Text>
-        ) : null}
-
-        {session.trainerName && (
-          <Text style={styles.detail}>Trainer: {session.trainerName}</Text>
-        )}
-        {session.goals.length > 0 && (
-          <Text style={styles.detail}>Goal: {session.goals.join(", ")}</Text>
-        )}
-      </View>
-
-      {/* Syncing indicator */}
-      {isSyncing && (
-        <View style={styles.syncingCard}>
-          <ActivityIndicator color="#38BDF8" size="small" style={{ marginRight: 10 }} />
-          <Text style={styles.syncingText}>
-            {session.localStatus === "syncing"
-              ? "Uploading and processing your session..."
-              : "Preparing to sync..."}
-          </Text>
-        </View>
-      )}
-
-      {session.localStatus === "interrupted" && (
-        <View style={styles.interruptedCard}>
-          <Text style={styles.interruptedTitle}>Recording interrupted</Text>
-          <Text style={styles.interruptedText}>
-            Trainwell preserved any audio left after the app closed unexpectedly. The file may be
-            incomplete, so it will never upload unless you explicitly try processing it.
-          </Text>
-          <TouchableOpacity
-            style={[styles.retryButton, recovering && styles.retryButtonDisabled]}
-            disabled={recovering}
-            onPress={async () => {
-              setRecovering(true);
-              try {
-                await processInterruptedRecording(id);
-              } catch (error) {
-                Alert.alert("Recovery failed", (error as Error).message);
-              } finally {
-                await loadAll();
-                setRecovering(false);
-              }
-            }}
-          >
-            <Text style={styles.retryButtonText}>
-              {recovering ? "Trying saved audio..." : "Try Processing Saved Audio"}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Stats */}
-      <View style={styles.statsRow}>
-        <View style={styles.stat}>
-          <Text style={styles.statValue}>{audioCount}</Text>
-          <Text style={styles.statLabel}>Audio Chunks</Text>
-        </View>
-        <View style={styles.stat}>
-          <Text style={styles.statValue}>{noteCount}</Text>
-          <Text style={styles.statLabel}>Quick Notes</Text>
-        </View>
-        <View style={styles.stat}>
-          <Text style={styles.statValue}>
-            {session.exercises?.length ?? 0}
-          </Text>
-          <Text style={styles.statLabel}>Exercises</Text>
-        </View>
-      </View>
-
-      {/* Exercises */}
-      {session.exercises && session.exercises.length > 0 && (
-        <View style={styles.card}>
-          <Text style={styles.cardEyebrow}>Movement breakdown</Text>
-          <Text style={styles.sectionTitle}>Exercises</Text>
-          {session.exercises.map((ex, i) => (
-            <View key={ex.id || String(i)} style={styles.exerciseRow}>
-              <View style={styles.exerciseHeader}>
-                <View style={styles.exerciseNumber}>
-                  <Text style={styles.exerciseNumberText}>
-                    {String(i + 1).padStart(2, "0")}
-                  </Text>
+        <View style={styles.heroCard}>
+          <View style={styles.heroOrb} />
+          <View style={styles.heroTopRow}>
+            <View style={styles.dateTile}>
+              <Text style={styles.dateMonth}>
+                {date.toLocaleDateString("en-US", { month: "short" }).toUpperCase()}
+              </Text>
+              <Text style={styles.dateDay}>{date.getDate()}</Text>
+            </View>
+            <View style={styles.heroCopy}>
+              <View style={styles.statusRow}>
+                <View style={[styles.statusDot, { backgroundColor: status.color }]} />
+                <Text style={[styles.statusText, { color: status.color }]}>{status.label}</Text>
+              </View>
+              <Text style={styles.heroTitle}>Your work, captured.</Text>
+              <Text style={styles.heroMeta}>
+                {session.trainerName ? `Training with ${session.trainerName}` : "Independent training session"}
+              </Text>
+            </View>
+          </View>
+          {session.goals.length > 0 && (
+            <View style={styles.goalRow}>
+              {session.goals.slice(0, 3).map((goal) => (
+                <View key={goal} style={styles.goalPill}>
+                  <Text style={styles.goalText}>{goal}</Text>
                 </View>
-                <View style={styles.exerciseBody}>
-                  <Text style={styles.exerciseName}>{ex.canonicalName}</Text>
-                  {ex.sets.length > 0 && (
-                    <Text style={styles.exerciseDetail}>
-                      {ex.sets.length} set{ex.sets.length !== 1 ? "s" : ""}
-                      {ex.sets[0]?.weight
-                        ? `  •  ${ex.sets[0].weight.value} ${ex.sets[0].weight.unit}`
-                        : ""}
-                    </Text>
+              ))}
+            </View>
+          )}
+        </View>
+
+        <View style={styles.metricsRow}>
+          <MetricTile
+            value={session.durationSeconds ? formatDuration(session.durationSeconds) : "—"}
+            label="Duration"
+          />
+          <MetricTile value={String(session.exercises?.length ?? 0)} label="Exercises" />
+          <MetricTile value={String(noteCount)} label="Quick notes" />
+        </View>
+
+        {isSyncing && (
+          <View style={styles.syncingCard}>
+            <ActivityIndicator color={colors.warning} size="small" />
+            <View style={styles.noticeCopy}>
+              <Text style={styles.syncingTitle}>Building your recap</Text>
+              <Text style={styles.syncingText}>
+                {session.localStatus === "syncing"
+                  ? "Uploading and processing your session."
+                  : "Preparing your recording for sync."}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {session.localStatus === "interrupted" && (
+          <View style={styles.interruptedCard}>
+            <Text style={styles.noticeEyebrow}>RECOVERY AVAILABLE</Text>
+            <Text style={styles.interruptedTitle}>The recording stopped unexpectedly.</Text>
+            <Text style={styles.interruptedText}>
+              Trainwell preserved any audio left on this phone. It may be incomplete and will not
+              upload unless you choose to process it.
+            </Text>
+            <TouchableOpacity
+              style={[styles.recoveryButton, recovering && styles.buttonDisabled]}
+              disabled={recovering}
+              onPress={async () => {
+                setRecovering(true);
+                try {
+                  await processInterruptedRecording(id);
+                } catch (error) {
+                  Alert.alert("Recovery failed", (error as Error).message);
+                } finally {
+                  await loadAll();
+                  setRecovering(false);
+                }
+              }}
+            >
+              <Text style={styles.recoveryButtonText}>
+                {recovering ? "Trying saved audio…" : "Try processing saved audio"}
+              </Text>
+              <Text style={styles.recoveryArrow}>→</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {session.exercises && session.exercises.length > 0 && (
+          <ReportSection eyebrow="MOVEMENT BREAKDOWN" title="Exercises">
+            {session.exercises.map((exercise, index) => {
+              const exerciseKey = exercise.id || String(index);
+              return (
+                <View key={exerciseKey} style={styles.exerciseRow}>
+                  <View style={styles.exerciseHeader}>
+                    <View style={styles.exerciseNumber}>
+                      <Text style={styles.exerciseNumberText}>
+                        {String(index + 1).padStart(2, "0")}
+                      </Text>
+                    </View>
+                    <View style={styles.exerciseBody}>
+                      <Text style={styles.exerciseName}>{exercise.canonicalName}</Text>
+                      {exercise.sets.length > 0 && (
+                        <Text style={styles.exerciseDetail}>
+                          {exercise.sets.length} set{exercise.sets.length !== 1 ? "s" : ""}
+                          {exercise.sets[0]?.weight
+                            ? `  ·  ${exercise.sets[0].weight.value} ${exercise.sets[0].weight.unit}`
+                            : ""}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                  {exercise.techniqueNotes.length > 0 && (
+                    <Text style={styles.exerciseCue}>{exercise.techniqueNotes[0].text}</Text>
+                  )}
+                  {exercise.referenceMedia && (
+                    <ExerciseMediaPreview
+                      exerciseName={exercise.canonicalName}
+                      media={exercise.referenceMedia}
+                      expanded={previewExerciseId === exerciseKey}
+                      onToggle={() =>
+                        setPreviewExerciseId((current) =>
+                          current === exerciseKey ? null : exerciseKey
+                        )
+                      }
+                    />
                   )}
                 </View>
+              );
+            })}
+          </ReportSection>
+        )}
+
+        {session.markdownContent && (
+          <ReportSection eyebrow="GENERATED RECORD" title="Session summary">
+            <Text style={styles.summaryText}>{session.markdownContent}</Text>
+          </ReportSection>
+        )}
+
+        {session.sessionNotes && session.sessionNotes.length > 0 && (
+          <ReportSection eyebrow="FROM THE SESSION" title="Notes">
+            {session.sessionNotes.map((note, index) => (
+              <ListItem key={`${note}-${index}`} text={note} />
+            ))}
+          </ReportSection>
+        )}
+
+        {session.nextSessionPlan && (
+          <ReportSection eyebrow="KEEP THE MOMENTUM" title="Next session">
+            {session.nextSessionPlan.exercises.map((exercise, index) => (
+              <View key={`${exercise.exerciseName}-${index}`} style={styles.planItem}>
+                <Text style={styles.planNumber}>{String(index + 1).padStart(2, "0")}</Text>
+                <View style={styles.planCopy}>
+                  <Text style={styles.planName}>{exercise.exerciseName}</Text>
+                  <Text style={styles.planDetail}>
+                    {[
+                      exercise.targetSets ? `${exercise.targetSets} sets` : null,
+                      exercise.targetWeight ? `at ${exercise.targetWeight}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ") || "Continue building from this session"}
+                  </Text>
+                </View>
               </View>
-              {ex.techniqueNotes.length > 0 && (
-                <Text style={styles.exerciseCue}>{ex.techniqueNotes[0].text}</Text>
-              )}
-              {ex.referenceMedia && (
-                <ExerciseMediaPreview
-                  exerciseName={ex.canonicalName}
-                  media={ex.referenceMedia}
-                  expanded={previewExerciseId === (ex.id || String(i))}
-                  onToggle={() =>
-                    setPreviewExerciseId((current) =>
-                      current === (ex.id || String(i)) ? null : ex.id || String(i)
-                    )
-                  }
-                />
-              )}
+            ))}
+            {session.nextSessionPlan.generalNotes.map((note, index) => (
+              <ListItem key={`${note}-${index}`} text={note} />
+            ))}
+          </ReportSection>
+        )}
+
+        {session.remoteStatus === "review_required" && (
+          <TouchableOpacity
+            style={styles.reviewButton}
+            onPress={() => router.push(`/review/${id}`)}
+          >
+            <View>
+              <Text style={styles.reviewEyebrow}>MAKE IT YOURS</Text>
+              <Text style={styles.reviewTitle}>Review & finalize</Text>
             </View>
-          ))}
-        </View>
-      )}
+            <View style={styles.reviewArrowCircle}>
+              <Text style={styles.reviewArrow}>↗</Text>
+            </View>
+          </TouchableOpacity>
+        )}
 
-      {/* Compact workout summary */}
-      {session.markdownContent && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Summary</Text>
-          <Text style={styles.summaryText}>{session.markdownContent}</Text>
-        </View>
-      )}
-
-      {/* Session notes */}
-      {session.sessionNotes && session.sessionNotes.length > 0 && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Session Notes</Text>
-          {session.sessionNotes.map((note, i) => (
-            <Text key={i} style={styles.noteText}>
-              • {note}
+        {session.localStatus === "local_error" && (
+          <View style={styles.errorCard}>
+            <Text style={styles.noticeEyebrow}>SYNC NEEDS ATTENTION</Text>
+            <Text style={styles.errorTitle}>Your session is safe on this phone.</Text>
+            <Text style={styles.errorCardText}>
+              Try the upload again, or add credits if your balance is empty.
             </Text>
-          ))}
-        </View>
-      )}
+            <View style={styles.errorActions}>
+              <TouchableOpacity
+                style={styles.errorAction}
+                onPress={async () => {
+                  try {
+                    await retrySessionSync(id);
+                  } catch (error) {
+                    Alert.alert("Retry failed", (error as Error).message);
+                  } finally {
+                    await loadAll();
+                  }
+                }}
+              >
+                <Text style={styles.errorActionText}>Retry sync</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.errorAction} onPress={() => router.push("/credits")}>
+                <Text style={styles.errorActionText}>Get credits</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
-      {/* Next session plan */}
-      {session.nextSessionPlan && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Next Session Plan</Text>
-          {session.nextSessionPlan.exercises.map((ex, i) => (
-            <Text key={i} style={styles.noteText}>
-              • {ex.exerciseName}
-              {ex.targetSets ? ` — ${ex.targetSets} sets` : ""}
-              {ex.targetWeight ? ` @ ${ex.targetWeight}` : ""}
-            </Text>
-          ))}
-          {session.nextSessionPlan.generalNotes.map((n, i) => (
-            <Text key={`gn-${i}`} style={styles.noteText}>
-              {n}
-            </Text>
-          ))}
-        </View>
-      )}
-
-      {/* Review & finalize */}
-      {session.remoteStatus === "review_required" && (
-        <TouchableOpacity
-          style={styles.reviewButton}
-          onPress={() => router.push(`/review/${id}`)}
-        >
-          <Text style={styles.reviewButtonText}>Review & Finalize</Text>
+        <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
+          <Text style={styles.deleteButtonText}>Delete this session</Text>
         </TouchableOpacity>
-      )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
 
-      {/* Error state with retry */}
-      {session.localStatus === "local_error" && (
-        <View style={styles.errorCard}>
-          <Text style={styles.errorCardText}>
-            Sync failed. The session is saved locally.
-          </Text>
-          <TouchableOpacity
-            style={styles.retryButton}
-            onPress={async () => {
-              try {
-                await retrySessionSync(id);
-              } catch (error) {
-                Alert.alert("Retry failed", (error as Error).message);
-              } finally {
-                await loadAll();
-              }
-            }}
-          >
-            <Text style={styles.retryButtonText}>Retry Sync</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.retryButton}
-            onPress={() => router.push("/credits")}
-          >
-            <Text style={styles.retryButtonText}>Get Credits</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+function MetricTile({ value, label }: { value: string; label: string }) {
+  return (
+    <View style={styles.metricTile}>
+      <Text style={styles.metricValue} numberOfLines={1}>{value}</Text>
+      <Text style={styles.metricLabel}>{label}</Text>
+    </View>
+  );
+}
 
-      <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
-        <Text style={styles.deleteButtonText}>Delete Session</Text>
-      </TouchableOpacity>
-    </ScrollView>
+function ReportSection({
+  eyebrow,
+  title,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <View style={styles.reportSection}>
+      <Text style={styles.sectionEyebrow}>{eyebrow}</Text>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {children}
+    </View>
+  );
+}
+
+function ListItem({ text }: { text: string }) {
+  return (
+    <View style={styles.listItem}>
+      <View style={styles.listDot} />
+      <Text style={styles.listText}>{text}</Text>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0F172A" },
-  center: { alignItems: "center", justifyContent: "center" },
-  errorText: { color: "#F87171", fontSize: 16 },
-  card: {
-    backgroundColor: "#1E293B",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-  },
-  syncingCard: {
-    backgroundColor: "#0F2744",
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 12,
-    flexDirection: "row",
-    alignItems: "center",
+  safeArea: { flex: 1, backgroundColor: colors.background },
+  scrollView: { flex: 1 },
+  content: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 48 },
+  center: { alignItems: "center", justifyContent: "center", padding: 24 },
+  errorText: { color: colors.danger, fontSize: 16, fontWeight: "700" },
+  returnButton: { marginTop: 16, borderRadius: radii.pill, backgroundColor: colors.surface, paddingHorizontal: 16, paddingVertical: 10 },
+  returnButtonText: { color: colors.accent, fontSize: 12, fontWeight: "800" },
+  heroCard: {
+    borderRadius: 28,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: "#1E4080",
+    borderColor: colors.border,
+    padding: 19,
+    overflow: "hidden",
   },
-  syncingText: { color: "#38BDF8", fontSize: 14, flex: 1 },
-  interruptedCard: {
-    backgroundColor: "#3A2A0C",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#92400E",
-    padding: 16,
-    marginBottom: 12,
+  heroOrb: {
+    position: "absolute",
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    borderWidth: 32,
+    borderColor: "rgba(199, 243, 107, 0.035)",
+    right: -58,
+    top: -70,
   },
-  interruptedTitle: { color: "#FBBF24", fontSize: 16, fontWeight: "700" },
-  interruptedText: { color: "#FDE68A", fontSize: 14, lineHeight: 20, marginTop: 8, marginBottom: 14 },
-  cardTitle: {
-    color: "#94A3B8",
-    fontSize: 11,
-    fontWeight: "600",
-    letterSpacing: 0.8,
-    textTransform: "uppercase",
-    marginBottom: 10,
-  },
-  cardEyebrow: {
-    color: "#C7F36B",
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-  },
-  sectionTitle: {
-    color: "#F8FAFC",
-    fontSize: 20,
-    fontWeight: "800",
-    marginTop: 5,
-    marginBottom: 14,
-  },
-  workoutType: {
-    color: "#F1F5F9",
-    fontSize: 22,
-    fontWeight: "700",
-    marginBottom: 8,
-  },
-  statusBadge: {
-    alignSelf: "flex-start",
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    marginBottom: 12,
-  },
-  statusBadgeText: { fontSize: 13, fontWeight: "600", textTransform: "capitalize" },
-  date: { color: "#94A3B8", fontSize: 15, marginBottom: 4 },
-  duration: { color: "#64748B", fontSize: 14, marginBottom: 4 },
-  detail: { color: "#64748B", fontSize: 14, marginBottom: 2 },
-  statsRow: {
-    flexDirection: "row",
-    gap: 10,
-    marginBottom: 12,
-  },
-  stat: {
-    flex: 1,
-    backgroundColor: "#1E293B",
-    borderRadius: 10,
-    padding: 14,
-    alignItems: "center",
-  },
-  statValue: { color: "#38BDF8", fontSize: 22, fontWeight: "700" },
-  statLabel: { color: "#64748B", fontSize: 12, marginTop: 2 },
-  summaryText: {
-    color: "#CBD5E1",
-    fontSize: 14,
-    lineHeight: 22,
-    fontFamily: "monospace",
-  },
-  exerciseRow: {
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.07)",
-    backgroundColor: "rgba(2, 6, 23, 0.34)",
-    padding: 13,
-    marginBottom: 10,
-  },
+  heroTopRow: { flexDirection: "row", alignItems: "center" },
+  dateTile: { width: 66, height: 76, borderRadius: 20, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center", marginRight: 15 },
+  dateMonth: { color: "#506A28", fontSize: 9, fontWeight: "900", letterSpacing: 1.2 },
+  dateDay: { color: colors.accentText, fontSize: 30, fontWeight: "900", letterSpacing: -1, marginTop: 1 },
+  heroCopy: { flex: 1 },
+  statusRow: { flexDirection: "row", alignItems: "center" },
+  statusDot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
+  statusText: { fontSize: 9, fontWeight: "900", letterSpacing: 0.5, textTransform: "uppercase" },
+  heroTitle: { color: colors.text, fontSize: 18, fontWeight: "900", letterSpacing: -0.35, marginTop: 7 },
+  heroMeta: { color: colors.textMuted, fontSize: 11, marginTop: 5 },
+  goalRow: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 17, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border },
+  goalPill: { borderRadius: radii.pill, backgroundColor: colors.surfaceMuted, paddingHorizontal: 11, paddingVertical: 7 },
+  goalText: { color: colors.textMuted, fontSize: 9, fontWeight: "800" },
+  metricsRow: { flexDirection: "row", gap: 9, marginTop: 10, marginBottom: 27 },
+  metricTile: { flex: 1, minHeight: 82, borderRadius: radii.medium, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, padding: 13, justifyContent: "center" },
+  metricValue: { color: colors.text, fontSize: 20, fontWeight: "900", letterSpacing: -0.6 },
+  metricLabel: { color: colors.textFaint, fontSize: 9, fontWeight: "700", marginTop: 4 },
+  syncingCard: { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: radii.medium, backgroundColor: "rgba(244, 199, 107, 0.08)", borderWidth: 1, borderColor: "rgba(244, 199, 107, 0.2)", padding: 15, marginBottom: 12 },
+  noticeCopy: { flex: 1 },
+  syncingTitle: { color: colors.warning, fontSize: 13, fontWeight: "800" },
+  syncingText: { color: colors.textMuted, fontSize: 10, lineHeight: 15, marginTop: 3 },
+  interruptedCard: { borderRadius: radii.large, backgroundColor: "rgba(244, 199, 107, 0.08)", borderWidth: 1, borderColor: "rgba(244, 199, 107, 0.22)", padding: 18, marginBottom: 12 },
+  noticeEyebrow: { color: colors.warning, fontSize: 8, fontWeight: "900", letterSpacing: 1.3 },
+  interruptedTitle: { color: colors.text, fontSize: 18, lineHeight: 22, fontWeight: "900", marginTop: 8 },
+  interruptedText: { color: colors.textMuted, fontSize: 11, lineHeight: 17, marginTop: 7 },
+  recoveryButton: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderRadius: radii.medium, backgroundColor: colors.warning, paddingHorizontal: 15, paddingVertical: 13, marginTop: 15 },
+  recoveryButtonText: { color: "#2B220F", fontSize: 12, fontWeight: "900" },
+  recoveryArrow: { color: "#2B220F", fontSize: 17 },
+  buttonDisabled: { opacity: 0.55 },
+  reportSection: { borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, padding: 17, marginBottom: 12 },
+  sectionEyebrow: { color: colors.accent, fontSize: 8, fontWeight: "900", letterSpacing: 1.35 },
+  sectionTitle: { color: colors.text, fontSize: 21, fontWeight: "900", letterSpacing: -0.45, marginTop: 5, marginBottom: 15 },
+  exerciseRow: { borderRadius: radii.medium, backgroundColor: "rgba(7, 10, 17, 0.52)", borderWidth: 1, borderColor: colors.border, padding: 13, marginBottom: 9 },
   exerciseHeader: { flexDirection: "row", alignItems: "center", gap: 11 },
-  exerciseNumber: {
-    width: 36,
-    height: 36,
-    borderRadius: 11,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#293345",
-  },
-  exerciseNumberText: { color: "#C7F36B", fontSize: 11, fontWeight: "800" },
+  exerciseNumber: { width: 36, height: 36, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceMuted },
+  exerciseNumberText: { color: colors.accent, fontSize: 10, fontWeight: "900" },
   exerciseBody: { flex: 1 },
-  exerciseName: { color: "#F8FAFC", fontSize: 15, fontWeight: "700" },
-  exerciseDetail: { color: "#64748B", fontSize: 12, fontWeight: "600", marginTop: 3 },
-  exerciseCue: {
-    color: "#94A3B8",
-    fontSize: 12,
-    lineHeight: 18,
-    borderLeftWidth: 2,
-    borderLeftColor: "rgba(155, 138, 251, 0.55)",
-    paddingLeft: 10,
-    marginTop: 11,
-  },
-  noteText: { color: "#CBD5E1", fontSize: 14, marginBottom: 4 },
-  reviewButton: {
-    backgroundColor: "#7C3AED",
-    borderRadius: 14,
-    padding: 18,
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  reviewButtonText: { color: "#fff", fontSize: 16, fontWeight: "700" },
-  errorCard: {
-    backgroundColor: "#2D1515",
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "#7F1D1D",
-    gap: 10,
-  },
-  errorCardText: { color: "#F87171", fontSize: 14 },
-  retryButton: {
-    backgroundColor: "#7F1D1D",
-    borderRadius: 8,
-    padding: 10,
-    alignItems: "center",
-  },
-  retryButtonDisabled: { opacity: 0.55 },
-  retryButtonText: { color: "#FCA5A5", fontSize: 14, fontWeight: "600" },
-  navRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 16,
-    gap: 8,
-  },
-  navButton: {
-    flex: 1,
-    backgroundColor: "#1E293B",
-    borderRadius: 8,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  navButtonDisabled: { opacity: 0.3 },
-  navButtonText: { color: "#38BDF8", fontSize: 13, fontWeight: "600" },
-  navButtonTextDisabled: { color: "#64748B" },
-  deleteButton: {
-    backgroundColor: "transparent",
-    borderWidth: 1,
-    borderColor: "#7F1D1D",
-    borderRadius: 12,
-    padding: 14,
-    alignItems: "center",
-    marginTop: 8,
-  },
-  deleteButtonText: { color: "#F87171", fontSize: 15 },
+  exerciseName: { color: colors.text, fontSize: 14, fontWeight: "800" },
+  exerciseDetail: { color: colors.textFaint, fontSize: 10, fontWeight: "700", marginTop: 4 },
+  exerciseCue: { color: colors.textMuted, fontSize: 11, lineHeight: 17, borderLeftWidth: 2, borderLeftColor: "rgba(155, 138, 251, 0.55)", paddingLeft: 10, marginTop: 11 },
+  summaryText: { color: colors.textMuted, fontSize: 13, lineHeight: 21 },
+  listItem: { flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 10 },
+  listDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent, marginTop: 6 },
+  listText: { color: colors.textMuted, fontSize: 12, lineHeight: 18, flex: 1 },
+  planItem: { flexDirection: "row", alignItems: "center", borderRadius: radii.medium, backgroundColor: colors.violetDark, padding: 13, marginBottom: 9 },
+  planNumber: { color: colors.violet, fontSize: 10, fontWeight: "900", width: 31 },
+  planCopy: { flex: 1 },
+  planName: { color: colors.text, fontSize: 13, fontWeight: "800" },
+  planDetail: { color: "#ACA4D7", fontSize: 10, marginTop: 4 },
+  reviewButton: { minHeight: 98, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderRadius: radii.large, backgroundColor: colors.accent, paddingHorizontal: 20, marginBottom: 12, overflow: "hidden" },
+  reviewEyebrow: { color: "#506A28", fontSize: 8, fontWeight: "900", letterSpacing: 1.25 },
+  reviewTitle: { color: colors.accentText, fontSize: 21, fontWeight: "900", letterSpacing: -0.45, marginTop: 5 },
+  reviewArrowCircle: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accentText, alignItems: "center", justifyContent: "center" },
+  reviewArrow: { color: colors.accent, fontSize: 20, fontWeight: "700" },
+  errorCard: { borderRadius: radii.large, backgroundColor: "rgba(255, 125, 125, 0.08)", borderWidth: 1, borderColor: "rgba(255, 125, 125, 0.22)", padding: 18, marginBottom: 12 },
+  errorTitle: { color: colors.text, fontSize: 17, fontWeight: "900", marginTop: 8 },
+  errorCardText: { color: colors.textMuted, fontSize: 11, lineHeight: 17, marginTop: 6 },
+  errorActions: { flexDirection: "row", gap: 9, marginTop: 14 },
+  errorAction: { flex: 1, borderRadius: radii.medium, backgroundColor: "rgba(255, 125, 125, 0.12)", padding: 12, alignItems: "center" },
+  errorActionText: { color: colors.danger, fontSize: 11, fontWeight: "900" },
+  deleteButton: { borderRadius: radii.medium, borderWidth: 1, borderColor: "rgba(255, 125, 125, 0.16)", padding: 14, alignItems: "center", marginTop: 7 },
+  deleteButtonText: { color: colors.danger, fontSize: 11, fontWeight: "800" },
 });

@@ -134,10 +134,10 @@ function RootNavigator() {
         name="session/active"
         options={{ title: "Recording", headerBackVisible: false, gestureEnabled: false }}
       />
-      <Stack.Screen name="session/[id]" options={{ title: "Session" }} />
-      <Stack.Screen name="history/index" options={{ title: "History" }} />
+      <Stack.Screen name="session/[id]" options={{ headerShown: false }} />
+      <Stack.Screen name="history/index" options={{ headerShown: false }} />
       <Stack.Screen name="review/[id]" options={{ title: "Review Session" }} />
-      <Stack.Screen name="ask" options={{ title: "Ask AI" }} />
+      <Stack.Screen name="ask" options={{ headerShown: false }} />
       <Stack.Screen name="credits" options={{ title: "Credits" }} />
     </Stack>
   );
