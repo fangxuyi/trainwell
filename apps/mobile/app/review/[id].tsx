@@ -1,18 +1,27 @@
+import type { ExerciseRecord, WorkoutSession } from "@trainwell/schemas";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useEffect, useState } from "react";
 import {
-  View,
-  Text,
+  ActivityIndicator,
+  Alert,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
-  TouchableOpacity,
+  Text,
   TextInput,
-  Alert,
-  ActivityIndicator,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
-import type { WorkoutSession, ExerciseRecord } from "@trainwell/schemas";
-import { getSessionById, saveExerciseEdits, finalizeSession } from "../../src/db/sessions";
+import {
+  finalizeSession,
+  getSessionById,
+  saveExerciseEdits,
+} from "../../src/db/sessions";
+import { enqueueJob } from "../../src/db/syncJobs";
 import { deleteLocalAudio } from "../../src/storage/audioFiles";
+import { runSyncWorker } from "../../src/sync/worker";
+import { ScreenHeader } from "../../src/ui/ScreenHeader";
+import { colors, radii } from "../../src/ui/theme";
 
 export default function ReviewScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -23,38 +32,50 @@ export default function ReviewScreen() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    getSessionById(id).then((s) => {
-      setSession(s);
-      setExercises(s?.exercises ?? []);
+    getSessionById(id).then((currentSession) => {
+      setSession(currentSession);
+      setExercises(currentSession?.exercises ?? []);
       setLoading(false);
     });
   }, [id]);
 
-  const updateExerciseName = (idx: number, name: string) => {
-    setExercises((prev) =>
-      prev.map((ex, i) => (i === idx ? { ...ex, canonicalName: name } : ex))
+  const returnToSession = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace(`/session/${id}`);
+    }
+  };
+
+  const updateExerciseName = (exerciseIndex: number, name: string) => {
+    setExercises((previous) =>
+      previous.map((exercise, index) =>
+        index === exerciseIndex ? { ...exercise, canonicalName: name } : exercise
+      )
     );
   };
 
   const updateSet = (
-    exIdx: number,
-    setIdx: number,
+    exerciseIndex: number,
+    setIndex: number,
     field: "completedReps" | "weightValue",
     raw: string
   ) => {
-    const num = parseInt(raw, 10);
-    setExercises((prev) =>
-      prev.map((ex, i) => {
-        if (i !== exIdx) return ex;
+    const value = Number(raw);
+    setExercises((previous) =>
+      previous.map((exercise, index) => {
+        if (index !== exerciseIndex) return exercise;
         return {
-          ...ex,
-          sets: ex.sets.map((s, j) => {
-            if (j !== setIdx) return s;
-            if (field === "completedReps") return { ...s, completedReps: isNaN(num) ? undefined : num };
-            if (field === "weightValue" && s.weight) {
-              return { ...s, weight: { ...s.weight, value: isNaN(num) ? s.weight.value : num } };
+          ...exercise,
+          sets: exercise.sets.map((set, currentSetIndex) => {
+            if (currentSetIndex !== setIndex) return set;
+            if (field === "completedReps") {
+              return { ...set, completedReps: raw === "" || Number.isNaN(value) ? undefined : value };
             }
-            return s;
+            if (field === "weightValue" && set.weight && raw !== "" && !Number.isNaN(value)) {
+              return { ...set, weight: { ...set.weight, value } };
+            }
+            return set;
           }),
         };
       })
@@ -73,13 +94,15 @@ export default function ReviewScreen() {
             setSaving(true);
             try {
               await saveExerciseEdits(id, exercises);
+              await enqueueJob(id, "finalize_remote_session");
               await finalizeSession(id);
               if (session?.audioRetentionPolicy === "delete_after_review") {
                 await deleteLocalAudio(id);
               }
-              router.replace(`/session/${id}`);
-            } catch (err) {
-              Alert.alert("Error", (err as Error).message);
+              void runSyncWorker(id);
+              returnToSession();
+            } catch (error) {
+              Alert.alert("Could not finalize session", (error as Error).message);
             } finally {
               setSaving(false);
             }
@@ -91,167 +114,204 @@ export default function ReviewScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.container, styles.center]}>
-        <ActivityIndicator color="#38BDF8" />
-      </View>
+      <SafeAreaView style={[styles.safeArea, styles.center]}>
+        <ActivityIndicator color={colors.accent} />
+      </SafeAreaView>
     );
   }
 
   if (!session) {
     return (
-      <View style={[styles.container, styles.center]}>
+      <SafeAreaView style={[styles.safeArea, styles.center]}>
         <Text style={styles.errorText}>Session not found.</Text>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: 60 }}>
-      <Text style={styles.intro}>
-        Review what Claude extracted. Edit anything that's wrong, then tap Finalize.
-      </Text>
-
-      {exercises.length === 0 && (
-        <View style={styles.emptyCard}>
-          <Text style={styles.emptyText}>No exercises were extracted from this session.</Text>
-        </View>
-      )}
-
-      {exercises.map((ex, exIdx) => (
-        <View key={ex.id} style={styles.card}>
-          <Text style={styles.cardLabel}>Exercise {exIdx + 1}</Text>
-          <TextInput
-            style={styles.nameInput}
-            value={ex.canonicalName}
-            onChangeText={(v) => updateExerciseName(exIdx, v)}
-            placeholder="Exercise name"
-            placeholderTextColor="#475569"
-          />
-
-          {ex.sets.filter((s) => s.completed).map((set, setIdx) => (
-            <View key={setIdx} style={styles.setRow}>
-              <Text style={styles.setLabel}>Set {set.setNumber}</Text>
-              <View style={styles.setFields}>
-                <View style={styles.fieldGroup}>
-                  <Text style={styles.fieldLabel}>Reps</Text>
-                  <TextInput
-                    style={styles.fieldInput}
-                    keyboardType="number-pad"
-                    value={set.completedReps != null ? String(set.completedReps) : ""}
-                    onChangeText={(v) => updateSet(exIdx, setIdx, "completedReps", v)}
-                    placeholder="—"
-                    placeholderTextColor="#475569"
-                  />
-                </View>
-                {set.weight && (
-                  <View style={styles.fieldGroup}>
-                    <Text style={styles.fieldLabel}>
-                      Weight ({set.weight.unit})
-                    </Text>
-                    <TextInput
-                      style={styles.fieldInput}
-                      keyboardType="decimal-pad"
-                      value={set.weight.value != null ? String(set.weight.value) : ""}
-                      onChangeText={(v) => updateSet(exIdx, setIdx, "weightValue", v)}
-                      placeholder="—"
-                      placeholderTextColor="#475569"
-                    />
-                  </View>
-                )}
-              </View>
-            </View>
-          ))}
-
-          {ex.techniqueNotes.length > 0 && (
-            <View style={styles.cueBox}>
-              <Text style={styles.cueLabel}>Trainer cues</Text>
-              {ex.techniqueNotes.map((n, i) => (
-                <Text key={i} style={styles.cueText}>• {n.text}</Text>
-              ))}
-            </View>
-          )}
-        </View>
-      ))}
-
-      <TouchableOpacity
-        style={[styles.finalizeButton, saving && styles.buttonDisabled]}
-        onPress={handleFinalize}
-        disabled={saving}
+    <SafeAreaView style={styles.safeArea}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.finalizeText}>
-          {saving ? "Saving..." : "Finalize Session"}
+        <ScreenHeader
+          eyebrow="FINAL CHECK"
+          title="Review session"
+          subtitle="Confirm the workout record and correct anything the AI misunderstood."
+          onBack={returnToSession}
+        />
+
+        {exercises.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>No exercises extracted</Text>
+            <Text style={styles.emptyText}>You can still finalize this session as reviewed.</Text>
+          </View>
+        ) : null}
+
+        {exercises.map((exercise, exerciseIndex) => (
+          <View key={exercise.id} style={styles.card}>
+            <Text style={styles.cardLabel}>EXERCISE {exerciseIndex + 1}</Text>
+            <TextInput
+              style={styles.nameInput}
+              value={exercise.canonicalName}
+              onChangeText={(value) => updateExerciseName(exerciseIndex, value)}
+              placeholder="Exercise name"
+              placeholderTextColor={colors.textFaint}
+            />
+
+            {exercise.sets.map((set, setIndex) =>
+              set.completed ? (
+                <View key={`${exercise.id}-${set.setNumber}-${setIndex}`} style={styles.setRow}>
+                  <Text style={styles.setLabel}>Set {set.setNumber}</Text>
+                  <View style={styles.setFields}>
+                    <View style={styles.fieldGroup}>
+                      <Text style={styles.fieldLabel}>REPS</Text>
+                      <TextInput
+                        style={styles.fieldInput}
+                        keyboardType="number-pad"
+                        value={set.completedReps != null ? String(set.completedReps) : ""}
+                        onChangeText={(value) =>
+                          updateSet(exerciseIndex, setIndex, "completedReps", value)
+                        }
+                        placeholder="—"
+                        placeholderTextColor={colors.textFaint}
+                      />
+                    </View>
+                    {set.weight ? (
+                      <View style={styles.fieldGroup}>
+                        <Text style={styles.fieldLabel}>WEIGHT ({set.weight.unit.toUpperCase()})</Text>
+                        <TextInput
+                          style={styles.fieldInput}
+                          keyboardType="decimal-pad"
+                          value={set.weight.value != null ? String(set.weight.value) : ""}
+                          onChangeText={(value) =>
+                            updateSet(exerciseIndex, setIndex, "weightValue", value)
+                          }
+                          placeholder="—"
+                          placeholderTextColor={colors.textFaint}
+                        />
+                      </View>
+                    ) : null}
+                  </View>
+                </View>
+              ) : null
+            )}
+
+            {exercise.techniqueNotes.length > 0 ? (
+              <View style={styles.cueBox}>
+                <Text style={styles.cueLabel}>TRAINER CUES</Text>
+                {exercise.techniqueNotes.map((note, index) => (
+                  <Text key={`${note.text}-${index}`} style={styles.cueText}>
+                    • {note.text}
+                  </Text>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        ))}
+
+        <TouchableOpacity
+          style={[styles.finalizeButton, saving && styles.buttonDisabled]}
+          onPress={handleFinalize}
+          disabled={saving}
+        >
+          {saving ? <ActivityIndicator color={colors.background} /> : null}
+          <Text style={styles.finalizeText}>
+            {saving ? "Finalizing…" : "Finalize session"}
+          </Text>
+          {!saving ? <Text style={styles.finalizeArrow}>→</Text> : null}
+        </TouchableOpacity>
+        <Text style={styles.finalizeNote}>
+          Finalizing saves your corrections and removes this session from the review queue.
         </Text>
-      </TouchableOpacity>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0F172A" },
+  safeArea: { flex: 1, backgroundColor: colors.background },
+  scrollView: { flex: 1 },
+  content: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 60 },
   center: { alignItems: "center", justifyContent: "center" },
-  errorText: { color: "#F87171", fontSize: 16 },
-  intro: { color: "#64748B", fontSize: 14, marginBottom: 16, lineHeight: 20 },
+  errorText: { color: colors.danger, fontSize: 16 },
   card: {
-    backgroundColor: "#1E293B",
-    borderRadius: 12,
-    padding: 14,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.large,
+    padding: 16,
     marginBottom: 12,
   },
   cardLabel: {
-    color: "#64748B",
-    fontSize: 11,
-    fontWeight: "600",
-    letterSpacing: 0.8,
-    textTransform: "uppercase",
-    marginBottom: 8,
+    color: colors.accent,
+    fontSize: 9,
+    fontWeight: "900",
+    letterSpacing: 1.5,
+    marginBottom: 9,
   },
   nameInput: {
-    backgroundColor: "#0F172A",
-    borderRadius: 8,
-    color: "#F1F5F9",
-    fontSize: 16,
-    fontWeight: "600",
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    marginBottom: 10,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 14,
+    color: colors.text,
+    fontSize: 17,
+    fontWeight: "800",
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+    marginBottom: 14,
   },
-  setRow: { marginBottom: 8 },
-  setLabel: { color: "#94A3B8", fontSize: 12, marginBottom: 4 },
+  setRow: { marginBottom: 12 },
+  setLabel: { color: colors.textMuted, fontSize: 12, fontWeight: "700", marginBottom: 6 },
   setFields: { flexDirection: "row", gap: 10 },
   fieldGroup: { flex: 1 },
-  fieldLabel: { color: "#64748B", fontSize: 11, marginBottom: 3 },
+  fieldLabel: { color: colors.textFaint, fontSize: 9, fontWeight: "900", letterSpacing: 1, marginBottom: 5 },
   fieldInput: {
-    backgroundColor: "#0F172A",
-    borderRadius: 8,
-    color: "#F1F5F9",
-    fontSize: 15,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: "700",
     paddingHorizontal: 10,
-    paddingVertical: 7,
+    paddingVertical: 9,
     textAlign: "center",
   },
   cueBox: {
-    marginTop: 8,
+    marginTop: 4,
     borderTopWidth: 1,
-    borderTopColor: "#0F172A",
-    paddingTop: 8,
+    borderTopColor: colors.border,
+    paddingTop: 13,
   },
-  cueLabel: { color: "#64748B", fontSize: 11, marginBottom: 4 },
-  cueText: { color: "#94A3B8", fontSize: 13, lineHeight: 18 },
+  cueLabel: { color: colors.violet, fontSize: 9, fontWeight: "900", letterSpacing: 1.2, marginBottom: 7 },
+  cueText: { color: colors.textMuted, fontSize: 13, lineHeight: 20 },
   emptyCard: {
-    backgroundColor: "#1E293B",
-    borderRadius: 12,
-    padding: 20,
-    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.large,
+    padding: 22,
     marginBottom: 16,
   },
-  emptyText: { color: "#475569", fontSize: 14 },
+  emptyTitle: { color: colors.text, fontSize: 17, fontWeight: "900" },
+  emptyText: { color: colors.textMuted, fontSize: 13, lineHeight: 19, marginTop: 6 },
   finalizeButton: {
-    backgroundColor: "#7C3AED",
-    borderRadius: 14,
-    padding: 18,
+    minHeight: 58,
+    backgroundColor: colors.accent,
+    borderRadius: radii.medium,
+    paddingHorizontal: 18,
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
     marginTop: 8,
   },
-  buttonDisabled: { opacity: 0.5 },
-  finalizeText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  buttonDisabled: { opacity: 0.65 },
+  finalizeText: { color: colors.background, fontSize: 15, fontWeight: "900" },
+  finalizeArrow: { color: colors.background, fontSize: 20, fontWeight: "700" },
+  finalizeNote: { color: colors.textFaint, fontSize: 11, lineHeight: 16, textAlign: "center", marginTop: 10, paddingHorizontal: 12 },
 });

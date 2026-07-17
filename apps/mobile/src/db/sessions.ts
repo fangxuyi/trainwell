@@ -286,7 +286,8 @@ export async function saveExerciseEdits(
 export async function finalizeSession(sessionId: string): Promise<void> {
   const db = await getDb();
   await db.runAsync(
-    `UPDATE sessions SET remote_status = 'finalized', updated_at = ?, local_version = local_version + 1 WHERE id = ?`,
+    `UPDATE sessions SET remote_status = 'finalized', sync_status = 'pending',
+       updated_at = ?, local_version = local_version + 1 WHERE id = ?`,
     [now(), sessionId]
   );
 }
@@ -395,7 +396,12 @@ export async function upsertSessionsFromServer(
     );
 
     await db.runAsync(
-      `UPDATE sessions SET remote_status = ?, remote_version = ?,
+      `UPDATE sessions SET
+         remote_status = CASE
+           WHEN remote_status = 'finalized' THEN 'finalized'
+           ELSE ?
+         END,
+         remote_version = ?,
          summary_version = COALESCE(?, summary_version)
        WHERE id = ? AND user_id = ?
          AND local_status NOT IN ('recording', 'paused')`,

@@ -50,11 +50,30 @@ async function runSyncWorkerInternal(sessionId: string): Promise<void> {
     return;
   }
 
+  const jobs = await getPendingJobsBySession(sessionId);
+  const finalizationJobs = jobs.filter((job) => job.type === "finalize_remote_session");
+  const processingJobs = jobs.filter(
+    (job) => job.type === "create_remote_session" || job.type === "upload_audio_chunk"
+  );
+
+  if (finalizationJobs.length > 0 && processingJobs.length === 0) {
+    try {
+      for (const job of finalizationJobs) {
+        await runJob(job, () => handleFinalizeRemoteSession(job));
+      }
+      await updateSessionStatus(sessionId, {
+        remoteStatus: "finalized",
+        syncStatus: "synchronized",
+      });
+    } catch (error) {
+      console.error("[SyncWorker] finalization sync failed for session", sessionId, error);
+    }
+    return;
+  }
+
   await updateSessionStatus(sessionId, { localStatus: "syncing", syncStatus: "pending" });
 
   try {
-    const jobs = await getPendingJobsBySession(sessionId);
-
     // Step 1: create session remotely (must run before uploads)
     const createJob = jobs.find((j) => j.type === "create_remote_session");
     if (createJob) {
@@ -215,6 +234,15 @@ async function handleUploadAudioChunk(job: SyncJob): Promise<void> {
   );
 
   await markSegmentUploaded(segment.id, blobUrl ?? "");
+}
+
+async function handleFinalizeRemoteSession(job: SyncJob): Promise<void> {
+  const session = await getSessionById(job.sessionId);
+  if (!session) throw new Error(`Session ${job.sessionId} not found`);
+
+  await apiPost<unknown>(`/api/workouts/${job.sessionId}/finalize`, {
+    exercises: session.exercises,
+  });
 }
 
 function sleep(ms: number): Promise<void> {

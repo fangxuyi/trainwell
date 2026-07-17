@@ -136,7 +136,7 @@ function RootNavigator() {
       />
       <Stack.Screen name="session/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="history/index" options={{ headerShown: false }} />
-      <Stack.Screen name="review/[id]" options={{ title: "Review Session" }} />
+      <Stack.Screen name="review/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="ask" options={{ headerShown: false }} />
       <Stack.Screen name="credits" options={{ title: "Credits" }} />
     </Stack>
