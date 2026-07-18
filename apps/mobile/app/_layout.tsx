@@ -128,7 +128,7 @@ function RootNavigator() {
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen
         name="session/new"
-        options={{ title: "New Workout", presentation: "modal" }}
+        options={{ headerShown: false, presentation: "modal" }}
       />
       <Stack.Screen
         name="session/active"
