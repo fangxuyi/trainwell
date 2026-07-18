@@ -150,8 +150,12 @@ Rollout order:
 
 1. Deploy with `BETA_INVITE_REQUIRED` unset or `false`.
 2. Run `/api/admin/migrate` to create the invitation tables and grandfather existing users.
-3. Generate invitation codes through the admin endpoint.
-4. Set `BETA_INVITE_REQUIRED=true` in Vercel Production and redeploy.
+3. Release a mobile build that includes the invitation screen. Do not enable the gate while testers may still be using an older build, because newly authenticated users on that build have no way to redeem a code.
+4. Generate invitation codes through the admin endpoint immediately before distribution so time-limited codes retain their full redemption window.
+5. Set `BETA_INVITE_REQUIRED=true` in Vercel Production and redeploy.
+6. Verify sign-up and redemption with a new Clerk account, including invalid, expired, and previously redeemed codes.
+
+Activation is currently deferred until a mobile Release/TestFlight build containing the invitation screen is available. The planned initial cohort is 20 unique codes, each limited to one redemption and expiring seven days after creation. The admin endpoint can accept caller-supplied codes or generate cryptographically random `TW-...` codes; generated codes are preferred. Because plaintext codes are returned only when created, save the distribution list securely at generation time. Code expiration controls only the redemption deadline—access already granted to a user does not expire with the code.
 
 To end the private beta immediately, set `BETA_INVITE_REQUIRED=false` and redeploy. No Clerk accounts or workout data need migration or deletion.
 
