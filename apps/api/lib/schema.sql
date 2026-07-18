@@ -129,6 +129,25 @@ CREATE TABLE IF NOT EXISTS billing_events (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS beta_invitation_codes (
+  id TEXT PRIMARY KEY,
+  code_hash TEXT NOT NULL UNIQUE,
+  label TEXT,
+  max_redemptions INTEGER NOT NULL DEFAULT 1 CHECK (max_redemptions > 0),
+  redemption_count INTEGER NOT NULL DEFAULT 0 CHECK (redemption_count >= 0),
+  expires_at TIMESTAMPTZ,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS beta_access_users (
+  user_id TEXT PRIMARY KEY,
+  invitation_code_id TEXT REFERENCES beta_invitation_codes(id) ON DELETE SET NULL,
+  source TEXT NOT NULL DEFAULT 'invitation_code',
+  granted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at DESC);
 CREATE INDEX IF NOT EXISTS session_chunks_session_id_idx ON session_chunks(session_id);
 CREATE INDEX IF NOT EXISTS session_chunks_embedding_idx
@@ -139,3 +158,5 @@ CREATE INDEX IF NOT EXISTS idx_audio_segments_session ON audio_segments(session_
 CREATE INDEX IF NOT EXISTS idx_transcript_session ON transcript_segments(session_id);
 CREATE INDEX IF NOT EXISTS idx_processing_jobs_session ON processing_jobs(session_id);
 CREATE INDEX IF NOT EXISTS credit_transactions_user_idx ON credit_transactions(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS beta_invitation_codes_active_idx
+  ON beta_invitation_codes(active, expires_at);

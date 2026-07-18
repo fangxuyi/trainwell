@@ -13,6 +13,7 @@ import { configureRevenueCat } from "../src/billing/revenueCat";
 import { colors } from "../src/ui/theme";
 import { claimLegacySessions } from "../src/db/sessions";
 import { setCurrentUserId } from "../src/auth/currentUser";
+import { resolveBetaAccess, subscribeToBetaAccess } from "../src/auth/betaAccess";
 
 const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
 const FOREGROUND_RECOVERY_INTERVAL_MS = 30_000;
@@ -40,6 +41,7 @@ function RootNavigator() {
   const router = useRouter();
   const [preparedUserId, setPreparedUserId] = useState<string | null>(null);
   const [localRecoveryReady, setLocalRecoveryReady] = useState(false);
+  const [betaAccess, setBetaAccess] = useState<{ userId: string; allowed: boolean } | null>(null);
 
   // Expose Clerk's token to the non-React api layer.
   useEffect(() => {
@@ -50,6 +52,7 @@ function RootNavigator() {
     setCurrentUserId(userId ?? null);
     if (!userId) {
       setPreparedUserId(null);
+      setBetaAccess(null);
       return;
     }
     claimLegacySessions(userId)
@@ -59,6 +62,26 @@ function RootNavigator() {
         setPreparedUserId(userId);
       });
   }, [userId]);
+
+  useEffect(() => subscribeToBetaAccess((grantedUserId) => {
+    setBetaAccess({ userId: grantedUserId, allowed: true });
+  }), []);
+
+  useEffect(() => {
+    if (!isSignedIn || !userId) return;
+    let active = true;
+    setBetaAccess(null);
+    resolveBetaAccess(userId)
+      .then((allowed) => {
+        if (active) setBetaAccess({ userId, allowed });
+      })
+      .catch(() => {
+        if (active) setBetaAccess({ userId, allowed: false });
+      });
+    return () => {
+      active = false;
+    };
+  }, [isSignedIn, userId]);
 
   useEffect(() => {
     if (isSignedIn && userId) configureRevenueCat(userId).catch(console.error);
@@ -72,7 +95,7 @@ function RootNavigator() {
   }, []);
 
   useEffect(() => {
-    if (!isSignedIn || !userId || preparedUserId !== userId) return;
+    if (!isSignedIn || !userId || preparedUserId !== userId || betaAccess?.userId !== userId || !betaAccess.allowed) return;
 
     const recoverIfOnline = async () => {
       if (AppState.currentState !== "active") return;
@@ -100,20 +123,27 @@ function RootNavigator() {
       networkSubscription.remove();
       clearInterval(recoveryInterval);
     };
-  }, [isSignedIn, preparedUserId, userId]);
+  }, [betaAccess, isSignedIn, preparedUserId, userId]);
 
   // Route users to/from the auth screens based on sign-in state.
   useEffect(() => {
     if (!isLoaded) return;
     const inAuth = segments[0] === "sign-in" || segments[0] === "sign-up";
+    const inInvite = segments[0] === "invite";
     if (!isSignedIn && !inAuth) {
       router.replace("/sign-in");
-    } else if (isSignedIn && inAuth) {
+    } else if (isSignedIn && betaAccess?.userId === userId && !betaAccess.allowed && !inInvite) {
+      router.replace("/invite");
+    } else if (isSignedIn && betaAccess?.userId === userId && betaAccess.allowed && (inAuth || inInvite)) {
       router.replace("/");
     }
-  }, [isLoaded, isSignedIn, segments]);
+  }, [betaAccess, isLoaded, isSignedIn, router, segments, userId]);
 
-  if (!isLoaded || !localRecoveryReady || (isSignedIn && preparedUserId !== userId)) {
+  if (
+    !isLoaded ||
+    !localRecoveryReady ||
+    (isSignedIn && (preparedUserId !== userId || betaAccess?.userId !== userId))
+  ) {
     return (
       <View style={{ flex: 1, backgroundColor: "#0F172A", alignItems: "center", justifyContent: "center" }}>
         <ActivityIndicator size="large" color="#38BDF8" />
@@ -125,6 +155,7 @@ function RootNavigator() {
     <Stack screenOptions={screenOptions}>
       <Stack.Screen name="sign-in" options={{ headerShown: false }} />
       <Stack.Screen name="sign-up" options={{ headerShown: false }} />
+      <Stack.Screen name="invite" options={{ headerShown: false, gestureEnabled: false }} />
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen
         name="session/new"
