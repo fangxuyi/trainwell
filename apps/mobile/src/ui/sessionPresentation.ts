@@ -10,6 +10,14 @@ export function sessionStatusPresentation(
   if (session.localStatus === "local_error" || session.remoteStatus === "failed") {
     return { label: "Needs attention", color: colors.danger };
   }
+  if (session.remoteStatus === "finalized") {
+    return { label: "Finalized", color: colors.success };
+  }
+  if (session.remoteStatus === "review_required") {
+    return session.syncStatus === "pending"
+      ? { label: "Finalizing", color: colors.warning }
+      : { label: "Ready to review", color: colors.warning };
+  }
   if (session.localStatus === "syncing" || session.remoteStatus === "processing") {
     return { label: "Processing", color: colors.warning };
   }

@@ -308,7 +308,17 @@ export default function SessionDetailScreen() {
           </ReportSection>
         )}
 
-        {session.remoteStatus === "review_required" && (
+        {session.remoteStatus === "review_required" && session.syncStatus === "pending" && (
+          <View style={styles.reviewButton}>
+            <View>
+              <Text style={styles.reviewEyebrow}>SAVING YOUR REVIEW</Text>
+              <Text style={styles.reviewTitle}>Finalizing…</Text>
+            </View>
+            <ActivityIndicator color={colors.background} />
+          </View>
+        )}
+
+        {session.remoteStatus === "review_required" && session.syncStatus !== "pending" && (
           <TouchableOpacity
             style={styles.reviewButton}
             onPress={() => router.push(`/review/${id}`)}

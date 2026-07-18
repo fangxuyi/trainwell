@@ -26,7 +26,12 @@ const activeWorkers = new Map<string, Promise<void>>();
 
 export function runSyncWorker(sessionId: string): Promise<void> {
   const activeWorker = activeWorkers.get(sessionId);
-  if (activeWorker) return activeWorker;
+  if (activeWorker) {
+    return activeWorker.then(
+      () => runSyncWorker(sessionId),
+      () => runSyncWorker(sessionId)
+    );
+  }
 
   const worker = runSyncWorkerInternal(sessionId).finally(() => {
     activeWorkers.delete(sessionId);
@@ -57,16 +62,26 @@ async function runSyncWorkerInternal(sessionId: string): Promise<void> {
   );
 
   if (finalizationJobs.length > 0 && processingJobs.length === 0) {
+    await updateSessionStatus(sessionId, {
+      localStatus: "syncing",
+      syncStatus: "pending",
+    });
     try {
       for (const job of finalizationJobs) {
         await runJob(job, () => handleFinalizeRemoteSession(job));
       }
       await updateSessionStatus(sessionId, {
+        localStatus: "cached",
         remoteStatus: "finalized",
         syncStatus: "synchronized",
       });
     } catch (error) {
       console.error("[SyncWorker] finalization sync failed for session", sessionId, error);
+      const retryable = await getPendingJobsBySession(sessionId);
+      await updateSessionStatus(sessionId, {
+        localStatus: retryable.length > 0 ? "locally_complete" : "local_error",
+        syncStatus: "failed",
+      });
     }
     return;
   }
