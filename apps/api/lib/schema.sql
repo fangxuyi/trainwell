@@ -148,6 +148,18 @@ CREATE TABLE IF NOT EXISTS beta_access_users (
   granted_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS body_measurements (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  body_part TEXT NOT NULL,
+  value DOUBLE PRECISION NOT NULL CHECK (value > 0),
+  unit TEXT NOT NULL CHECK (unit IN ('cm', 'in')),
+  measured_at TIMESTAMPTZ NOT NULL,
+  note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at DESC);
 CREATE INDEX IF NOT EXISTS session_chunks_session_id_idx ON session_chunks(session_id);
 CREATE INDEX IF NOT EXISTS session_chunks_embedding_idx
@@ -160,3 +172,5 @@ CREATE INDEX IF NOT EXISTS idx_processing_jobs_session ON processing_jobs(sessio
 CREATE INDEX IF NOT EXISTS credit_transactions_user_idx ON credit_transactions(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS beta_invitation_codes_active_idx
   ON beta_invitation_codes(active, expires_at);
+CREATE INDEX IF NOT EXISTS body_measurements_user_date_idx
+  ON body_measurements(user_id, measured_at DESC);

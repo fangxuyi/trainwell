@@ -95,12 +95,30 @@ export async function initDatabase(db: SQLite.SQLiteDatabase): Promise<void> {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS body_measurements (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      body_part TEXT NOT NULL,
+      value REAL NOT NULL,
+      unit TEXT NOT NULL CHECK (unit IN ('cm', 'in')),
+      measured_at TEXT NOT NULL,
+      note TEXT,
+      sync_status TEXT NOT NULL DEFAULT 'pending',
+      deleted_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_sessions_local_status ON sessions(local_status);
     CREATE INDEX IF NOT EXISTS idx_sessions_sync_status ON sessions(sync_status);
     CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at DESC);
     CREATE INDEX IF NOT EXISTS idx_audio_segments_session ON audio_segments(session_id, sequence);
     CREATE INDEX IF NOT EXISTS idx_sync_jobs_status ON sync_jobs(status, next_attempt_at);
     CREATE INDEX IF NOT EXISTS idx_quick_notes_session ON quick_notes(session_id);
+    CREATE INDEX IF NOT EXISTS idx_body_measurements_user_date
+      ON body_measurements(user_id, measured_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_body_measurements_sync
+      ON body_measurements(user_id, sync_status);
   `);
 
   // Migrations for existing databases

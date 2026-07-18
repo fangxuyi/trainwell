@@ -58,10 +58,17 @@ SQLite runs in WAL mode and contains:
 - `transcript_segments` — available in the schema but server transcripts are not currently synchronized into this local table.
 - `quick_notes` — timestamped notes captured during recording; currently local only.
 - `sync_jobs` — persistent network work with retries and backoff.
+- `body_measurements` — user-scoped circumference entries, local sync state, and deletion tombstones.
 
 Completed workout summaries and structured extraction data are cached in SQLite, not downloaded as standalone files. SQLite and session audio use the operating system's private app container, so uninstalling the app removes the local database and any remaining local recordings. Startup cleanup scans only session `audio` directories and removes physical recordings that no longer have a live `audio_segments` row; it does not remove cached workout summaries.
 
 Shared application types use camelCase. SQLite and Postgres rows use snake_case, with explicit conversions in database and API boundaries.
+
+### Body measurements
+
+The mobile Measurements screen records common or custom body areas in centimeters or inches, with a measurement date and optional note. It shows the latest value for each normalized body-area label, compares it with the prior entry after unit conversion, and retains a chronological history. Long-pressing a history entry creates a local deletion tombstone before any network request.
+
+Measurement creation is local-first: mobile writes a stable client-generated ID to SQLite with `sync_status = 'pending'`, then idempotently upserts it through `PUT /api/body-measurements/[id]`. The row itself is the durable retry record. Foreground recovery retries pending rows, downloads the authenticated user's server history, and reconciles deletions across devices. The API validates values and units and scopes reads, upserts, and deletes to the current Clerk user. Measurement history is not currently included in Ask AI retrieval.
 
 ### Recording
 
@@ -256,7 +263,7 @@ curl -X POST https://your-api.example/api/admin/migrate \
   -d '{"secret":"YOUR_ADMIN_SECRET"}'
 ```
 
-The migration creates pgvector and embedding indexes, credit and billing tables, beta invitation tables, grandfathered access rows, and the credit ledger functions.
+The migration creates pgvector and embedding indexes, credit and billing tables, beta invitation tables, grandfathered access rows, body measurement storage, and the credit ledger functions.
 
 After deploying finalized-only indexing, rebuild every existing finalized session so reviewed corrections and complete set data replace legacy pre-review chunks:
 

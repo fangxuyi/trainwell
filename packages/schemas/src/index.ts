@@ -250,6 +250,25 @@ export interface WorkoutSession {
   updatedAt: string;
 }
 
+// ─── Body measurements ─────────────────────────────────────────────────────
+
+export type BodyMeasurementUnit = "cm" | "in";
+export type BodyMeasurementSyncStatus = "pending" | "synchronized" | "failed";
+
+export interface BodyMeasurement {
+  id: string;
+  userId: string;
+  bodyPart: string;
+  value: number;
+  unit: BodyMeasurementUnit;
+  measuredAt: string;
+  note?: string;
+  syncStatus: BodyMeasurementSyncStatus;
+  deletedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ─── Sync queue ─────────────────────────────────────────────────────────────
 
 export interface SyncJob {

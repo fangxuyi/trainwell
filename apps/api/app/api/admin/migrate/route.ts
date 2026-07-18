@@ -482,5 +482,24 @@ export async function POST(req: NextRequest) {
     ON CONFLICT (user_id) DO NOTHING
   `;
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS body_measurements (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      body_part TEXT NOT NULL,
+      value DOUBLE PRECISION NOT NULL CHECK (value > 0),
+      unit TEXT NOT NULL CHECK (unit IN ('cm', 'in')),
+      measured_at TIMESTAMPTZ NOT NULL,
+      note TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+
+  await sql`
+    CREATE INDEX IF NOT EXISTS body_measurements_user_date_idx
+      ON body_measurements(user_id, measured_at DESC)
+  `;
+
   return NextResponse.json({ ok: true, message: "database migrations complete" });
 }

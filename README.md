@@ -37,6 +37,7 @@ The iPhone app is the primary experience. A companion web portal lets you revisi
 
 - Recent sessions and full workout history on mobile.
 - Editable extracted exercise names, reps, and weights before finalization.
+- Body measurement tracking for waist, chest, hips, limbs, and custom areas, with centimeter or inch units, dated history, and changes from the prior entry.
 - Ask AI across prior sessions using only the signed-in user’s workout history.
 - Authenticated web portal for viewing session details and asking workout-history questions.
 
@@ -55,7 +56,7 @@ The iPhone app is the primary experience. A companion web portal lets you revisi
 
 | Experience | Best for |
 |---|---|
-| **iPhone app** | Recording workouts, reviewing summaries, browsing history, checking credits, and asking AI questions. |
+| **iPhone app** | Recording workouts, reviewing summaries, tracking body measurements, browsing history, checking credits, and asking AI questions. |
 | **Web portal** | Reviewing sessions on a larger screen, asking questions, purchasing credits, and managing a Stripe subscription. |
 
 Mobile App Store billing is implemented through RevenueCat but is not yet live because the App Store Connect products and Apple Developer release setup are still pending. Until that setup is complete, purchases are available through the Stripe-powered web portal.
@@ -72,6 +73,6 @@ Trainwell is a training log and reflection tool, not a medical diagnostic servic
 
 ## Project status
 
-Trainwell is under active development and currently focuses on iOS. Core recording, transcription, structured summaries, history, authenticated web access, AI questions, credits, and Stripe billing are implemented. Mobile App Store purchases and several recovery and synchronization edge cases remain release work.
+Trainwell is under active development and currently focuses on iOS. Core recording, transcription, structured summaries, workout and body-measurement history, authenticated web access, AI questions, credits, and Stripe billing are implemented. Mobile App Store purchases and several recovery and synchronization edge cases remain release work.
 
 For architecture, setup, environment variables, validation commands, and known limitations, see [TECHNICAL.md](TECHNICAL.md).
