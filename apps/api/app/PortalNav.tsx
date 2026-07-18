@@ -1,6 +1,7 @@
 "use client";
 
 import { UserButton } from "@clerk/nextjs";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -18,10 +19,14 @@ export function PortalNav() {
     <header className="sticky top-0 z-50 border-b border-white/[0.07] bg-[#070A11]/82 backdrop-blur-xl">
       <nav className="mx-auto flex h-[4.5rem] max-w-6xl items-center gap-4 px-4 sm:px-6">
         <Link href="/sessions" className="group flex shrink-0 items-center gap-3">
-          <span className="relative flex size-9 items-center justify-center overflow-hidden rounded-[13px] bg-[#C7F36B] text-[#101707] shadow-[0_0_30px_rgba(199,243,107,0.16)]">
-            <span className="absolute -right-2 -top-2 size-6 rounded-full border-[5px] border-[#101707]/10" />
-            <span className="text-sm font-black tracking-[-0.08em]">TW</span>
-          </span>
+          <Image
+            src="/trainwell-icon.svg"
+            alt=""
+            width={36}
+            height={36}
+            priority
+            className="size-9 rounded-[13px] shadow-[0_0_30px_rgba(199,243,107,0.14)]"
+          />
           <span className="hidden sm:block">
             <span className="block text-[0.68rem] font-black tracking-[0.22em] text-[#C7F36B]">TRAINWELL</span>
             <span className="mt-0.5 block text-[0.63rem] font-medium text-[#667085]">Training intelligence</span>

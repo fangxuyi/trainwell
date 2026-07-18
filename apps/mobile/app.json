@@ -5,6 +5,11 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#070A11"
+    },
     "userInterfaceStyle": "automatic",
     "scheme": "trainwell",
     "ios": {
@@ -20,8 +25,9 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#0F172A",
-        "foregroundImage": "./assets/android-icon-foreground.png"
+        "backgroundColor": "#070A11",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "package": "com.trainwell.app",
       "permissions": [
