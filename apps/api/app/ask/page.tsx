@@ -37,7 +37,7 @@ function AskAIContent() {
       const response = await fetch("/api/assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, sessionId }),
+        body: JSON.stringify({ question, sessionId, history: messages }),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
@@ -64,6 +64,13 @@ function AskAIContent() {
 
   const sessionId = searchParams.get("session");
 
+  function startNewChat() {
+    if (loading) return;
+    setMessages([]);
+    setInput("");
+    inputRef.current?.focus();
+  }
+
   return (
     <div className="mx-auto flex h-[calc(100vh-9.5rem)] min-h-[34rem] max-w-4xl flex-col">
       <header className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -72,11 +79,20 @@ function AskAIContent() {
           <h1 className="page-title mt-2 text-4xl font-black text-[#F5F7FA] sm:text-5xl">Ask Trainwell</h1>
           <p className="mt-3 text-sm text-[#9CA7B8]">Explore patterns, coaching cues, and progress across your own workout history.</p>
         </div>
-        {sessionId && (
-          <div className="w-fit rounded-full border border-[#9B8AFB]/20 bg-[#211C3A]/60 px-3 py-2 text-[0.65rem] font-black tracking-wide text-[#9B8AFB]">
-            SESSION {sessionId.slice(0, 8).toUpperCase()}…
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {sessionId && (
+            <div className="w-fit rounded-full border border-[#9B8AFB]/20 bg-[#211C3A]/60 px-3 py-2 text-[0.65rem] font-black tracking-wide text-[#9B8AFB]">
+              SESSION {sessionId.slice(0, 8).toUpperCase()}…
+            </div>
+          )}
+          <button
+            onClick={startNewChat}
+            disabled={loading || messages.length === 0}
+            className="rounded-full border border-white/[0.09] bg-white/[0.035] px-3 py-2 text-[0.65rem] font-black tracking-wide text-[#9CA7B8] transition hover:border-[#C7F36B]/30 hover:text-[#C7F36B] disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            NEW CHAT
+          </button>
+        </div>
       </header>
 
       <section className="portal-card flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px]">

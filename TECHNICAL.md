@@ -132,6 +132,8 @@ Ask AI uses routed hybrid retrieval over finalized sessions only:
 4. Relative-history questions add a date-bounded SQL session list to semantic results.
 5. The configured language-model provider answers only from this context. The API returns deduplicated session citations alongside the answer.
 
+For follow-up questions, clients send at most the previous ten user/assistant messages. The backend bounds each message, asks the configured language model to rewrite the follow-up into a standalone retrieval query, retrieves against that query, and then answers the original question with both the retrieved workout context and prior conversation. A first-turn question uses one answer-generation call; a follow-up uses one query-rewrite call plus one answer-generation call. Conversation history remains client-side and New Chat clears it explicitly.
+
 All retrieval queries join chunks to `sessions`, require the current Clerk `user_id`, and require `remote_status = 'finalized'`. The web session-detail Ask link also passes its session ID so exact-session questions cannot drift into other workouts.
 
 `AI_PROVIDER` selects `anthropic` (the default) or `openai` for both workout extraction and Ask AI. The shared adapter in `apps/api/lib/language-model.ts` keeps prompts and response shapes provider-independent. `ANTHROPIC_MODEL` and `OPENAI_MODEL` are server-only overrides; changing the provider or model does not alter the mobile or web API contract.
