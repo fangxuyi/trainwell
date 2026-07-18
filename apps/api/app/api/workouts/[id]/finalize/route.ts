@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSessionOwner } from "@/lib/auth";
-import sql from "@/lib/db";
+import { finalizeAndIndexSession } from "@/lib/session-index";
+import type { ExtractionOutput } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export async function POST(
   req: NextRequest,
@@ -17,15 +19,19 @@ export async function POST(
     return NextResponse.json({ error: "exercises must be an array" }, { status: 400 });
   }
 
-  const rows = await sql`
-    UPDATE sessions
-    SET exercises = ${JSON.stringify(body.exercises)}::jsonb,
-        remote_status = 'finalized',
-        remote_version = COALESCE(remote_version, 0) + 1,
-        updated_at = now()
-    WHERE id = ${id} AND user_id = ${owner.userId}
-    RETURNING id, remote_status, remote_version
-  `;
+  const result = await finalizeAndIndexSession(
+    id,
+    owner.userId,
+    body.exercises as ExtractionOutput["exercises"]
+  );
+  if (!result) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
 
-  return NextResponse.json(rows[0]);
+  return NextResponse.json({
+    id: result.id,
+    remote_status: result.remoteStatus,
+    remote_version: result.remoteVersion,
+    indexed_chunks: result.chunks,
+  });
 }

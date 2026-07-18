@@ -1,10 +1,7 @@
 import sql from "./db";
-import { extractWorkoutData, extractWorkoutDataWindowed } from "./extract";
+import { extractWorkoutDataWindowed } from "./extract";
 import { generateSummaryText } from "./markdown";
-import { embedTexts } from "./voyage";
-import { chunkExtraction } from "./chunks";
 import { canonicalizeExtraction } from "./exercise-dataset";
-import { randomUUID } from "crypto";
 
 export async function transcribeAndExtract(sessionId: string): Promise<void> {
   // Transcription happens per-chunk at upload time; just fetch existing segments.
@@ -89,26 +86,4 @@ export async function transcribeAndExtract(sessionId: string): Promise<void> {
     WHERE id = ${sessionId}
   `;
 
-  // Embed chunks for RAG
-  await embedSession(sessionId, session, extraction);
-}
-
-async function embedSession(
-  sessionId: string,
-  session: { id: string; started_at: string; duration_seconds?: number; workout_type?: string; trainer_name?: string },
-  extraction: Awaited<ReturnType<typeof extractWorkoutData>>
-): Promise<void> {
-  const chunks = chunkExtraction(session, extraction);
-  if (chunks.length === 0) return;
-
-  await sql`DELETE FROM session_chunks WHERE session_id = ${sessionId}`;
-
-  const embeddings = await embedTexts(chunks.map((c) => c.content));
-  for (let i = 0; i < chunks.length; i++) {
-    const embeddingStr = `[${embeddings[i].join(",")}]`;
-    await sql`
-      INSERT INTO session_chunks (id, session_id, chunk_type, content, embedding)
-      VALUES (${randomUUID()}, ${sessionId}, ${chunks[i].chunkType}, ${chunks[i].content}, ${embeddingStr}::vector)
-    `;
-  }
 }
