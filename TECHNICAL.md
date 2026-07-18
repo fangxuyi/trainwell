@@ -138,6 +138,21 @@ All retrieval queries join chunks to `sessions`, require the current Clerk `user
 
 If hybrid retrieval finds no matching chunks, the route falls back to the five most recent finalized session records. If Voyage is temporarily unavailable, lexical retrieval remains available.
 
+### Private beta invitations
+
+`BETA_INVITE_REQUIRED=true` enables a temporary access gate after Clerk authentication. Clerk remains the identity provider, but newly authenticated users cannot enter portal pages or use authenticated application APIs until they redeem a Trainwell invitation code. Web and mobile provide dedicated `/invite` screens. Mobile caches a successful entitlement in SecureStore so approved beta users retain local access offline; server APIs continue enforcing the database entitlement.
+
+Invitation codes are generated through `/api/admin/invitation-codes`, protected by `ADMIN_SECRET`. Only a SHA-256 hash is stored. Codes support labels, expiration timestamps, and maximum redemption counts. Redemption atomically claims remaining capacity and grants one `beta_access_users` row per Clerk user. The migration grants `existing_user` access to every current session or credit-account owner before the gate is enabled.
+
+Rollout order:
+
+1. Deploy with `BETA_INVITE_REQUIRED` unset or `false`.
+2. Run `/api/admin/migrate` to create the invitation tables and grandfather existing users.
+3. Generate invitation codes through the admin endpoint.
+4. Set `BETA_INVITE_REQUIRED=true` in Vercel Production and redeploy.
+
+To end the private beta immediately, set `BETA_INVITE_REQUIRED=false` and redeploy. No Clerk accounts or workout data need migration or deletion.
+
 ## Credits and billing
 
 Postgres is the source of truth for balances, reservations, transactions, and idempotent billing events.
@@ -235,7 +250,7 @@ curl -X POST https://your-api.example/api/admin/migrate \
   -d '{"secret":"YOUR_ADMIN_SECRET"}'
 ```
 
-The migration creates pgvector, embedding tables and indexes, credit and billing tables, and the credit ledger functions.
+The migration creates pgvector and embedding indexes, credit and billing tables, beta invitation tables, grandfathered access rows, and the credit ledger functions.
 
 After deploying finalized-only indexing, rebuild every existing finalized session so reviewed corrections and complete set data replace legacy pre-review chunks:
 
@@ -244,6 +259,16 @@ curl -X POST https://your-api.example/api/admin/backfill-embeddings \
   -H 'Content-Type: application/json' \
   -d '{"secret":"YOUR_ADMIN_SECRET"}'
 ```
+
+To create a beta invitation code after running migrations:
+
+```bash
+curl -X POST https://your-api.example/api/admin/invitation-codes \
+  -H 'Content-Type: application/json' \
+  -d '{"secret":"YOUR_ADMIN_SECRET","label":"TestFlight cohort","maxRedemptions":10,"expiresAt":"2026-09-01T00:00:00Z"}'
+```
+
+The plaintext code is returned once in the response. Store and distribute it securely.
 
 ## Environment variables
 
@@ -261,6 +286,7 @@ curl -X POST https://your-api.example/api/admin/backfill-embeddings \
 | `VOYAGE_API_KEY` | Session and question embeddings. |
 | `BLOB_READ_WRITE_TOKEN` | Private Vercel Blob access and presigned uploads. |
 | `ADMIN_SECRET` | Protects database migration and backfill routes. |
+| `BETA_INVITE_REQUIRED` | Enables the temporary post-Clerk private-beta invitation gate. |
 | `GROQ_MAX_AUDIO_BYTES` | Optional transcription file-size guard override. |
 | `EXERCISE_DATASET_URL` | Optional override for the pinned exercise reference dataset. |
 | `EXERCISE_MEDIA_BASE_URL` | Optional HTTPS base URL for separately licensed exercise thumbnails and GIFs. Keep unset unless the deployment has media usage rights. |

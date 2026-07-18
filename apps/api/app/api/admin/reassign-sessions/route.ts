@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { isValidAdminSecret } from "@/lib/beta-access";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export async function POST(req: NextRequest) {
     sessionIds?: string[];
   };
 
-  if (secret !== process.env.ADMIN_SECRET) {
+  if (!isValidAdminSecret(secret)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   if (!userId || !Array.isArray(sessionIds) || sessionIds.length === 0) {

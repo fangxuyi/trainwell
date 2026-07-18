@@ -13,7 +13,7 @@ const links = [
 
 export function PortalNav() {
   const pathname = usePathname();
-  if (pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up")) return null;
+  if (pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up") || pathname.startsWith("/invite")) return null;
 
   return (
     <header className="sticky top-0 z-50 border-b border-white/[0.07] bg-[#070A11]/82 backdrop-blur-xl">

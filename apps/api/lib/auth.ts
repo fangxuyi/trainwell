@@ -1,12 +1,19 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { hasBetaAccess } from "@/lib/beta-access";
 
 // The Clerk user id for the current request, or null if unauthenticated.
 // Works for both the web portal (session cookie) and the mobile app
 // (Authorization: Bearer <token>).
-export async function getUserId(): Promise<string | null> {
+export async function getAuthenticatedUserId(): Promise<string | null> {
   const { userId } = await auth();
+  return userId;
+}
+
+export async function getUserId(): Promise<string | null> {
+  const userId = await getAuthenticatedUserId();
+  if (!userId || !(await hasBetaAccess(userId))) return null;
   return userId;
 }
 

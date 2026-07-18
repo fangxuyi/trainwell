@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { isValidAdminSecret } from "@/lib/beta-access";
 
 export const dynamic = "force-dynamic";
 
@@ -7,7 +8,7 @@ export const dynamic = "force-dynamic";
 // Protected by a shared secret to prevent unauthorized schema changes.
 export async function POST(req: NextRequest) {
   const { secret } = await req.json().catch(() => ({}));
-  if (secret !== process.env.ADMIN_SECRET) {
+  if (!isValidAdminSecret(secret)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -440,6 +441,45 @@ export async function POST(req: NextRequest) {
       RETURN TRUE;
     END;
     $function$ LANGUAGE plpgsql
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS beta_invitation_codes (
+      id TEXT PRIMARY KEY,
+      code_hash TEXT NOT NULL UNIQUE,
+      label TEXT,
+      max_redemptions INTEGER NOT NULL DEFAULT 1 CHECK (max_redemptions > 0),
+      redemption_count INTEGER NOT NULL DEFAULT 0 CHECK (redemption_count >= 0),
+      expires_at TIMESTAMPTZ,
+      active BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS beta_access_users (
+      user_id TEXT PRIMARY KEY,
+      invitation_code_id TEXT REFERENCES beta_invitation_codes(id) ON DELETE SET NULL,
+      source TEXT NOT NULL DEFAULT 'invitation_code',
+      granted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+
+  await sql`
+    CREATE INDEX IF NOT EXISTS beta_invitation_codes_active_idx
+      ON beta_invitation_codes(active, expires_at)
+  `;
+
+  await sql`
+    INSERT INTO beta_access_users (user_id, source)
+    SELECT user_id, 'existing_user'
+    FROM (
+      SELECT DISTINCT user_id FROM sessions WHERE user_id <> 'local'
+      UNION
+      SELECT DISTINCT user_id FROM credit_accounts
+    ) existing_users
+    ON CONFLICT (user_id) DO NOTHING
   `;
 
   return NextResponse.json({ ok: true, message: "database migrations complete" });
