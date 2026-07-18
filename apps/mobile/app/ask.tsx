@@ -12,7 +12,7 @@ import {
   View,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { ScreenHeader } from "../src/ui/ScreenHeader";
+import { HeaderAction, ScreenHeader } from "../src/ui/ScreenHeader";
 import { colors, radii } from "../src/ui/theme";
 import { apiPost } from "../src/utils/api";
 
@@ -49,7 +49,11 @@ export default function AskScreen() {
     setLoading(true);
 
     try {
-      const response = await apiPost<{ answer: string }>("/api/assistant", { question });
+      const history = messages.map((message) => ({
+        role: message.role,
+        content: message.text,
+      }));
+      const response = await apiPost<{ answer: string }>("/api/assistant", { question, history });
       setMessages((previous) => [
         ...previous,
         {
@@ -95,6 +99,17 @@ export default function AskScreen() {
                 title="Ask your history."
                 subtitle="Turn every recorded session into answers you can use in the next one."
                 onBack={() => router.back()}
+                action={
+                  <HeaderAction
+                    label="New chat"
+                    onPress={() => {
+                      if (!loading) {
+                        setMessages([]);
+                        setInput("");
+                      }
+                    }}
+                  />
+                }
               />
               {messages.length === 0 && (
                 <EmptyConversation onSelect={setInput} />

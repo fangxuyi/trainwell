@@ -238,13 +238,20 @@ function mergeExtractions(
 
 export async function answerWorkoutQuestion(
   question: string,
-  context: string
+  context: string,
+  history: Array<{ role: "user" | "assistant"; content: string }> = []
 ): Promise<{ answer: string; citations: Array<{ sessionId: string; date: string; excerpt: string }> }> {
+  const conversation = history.length > 0
+    ? JSON.stringify(history)
+    : "No previous messages.";
   const answer = await generateText({
     system: `You are a personal training assistant. Answer questions about the user's workout history concisely and accurately. Treat finalized session records and explicitly labeled computed totals as authoritative. Only state facts that are present in the provided context. Cite the specific session ID and date when referencing workout data. Do not infer facts from missing or unfinalized sessions.`,
     maxOutputTokens: 1024,
     prompt: `WORKOUT HISTORY CONTEXT:
 ${context}
+
+PREVIOUS CONVERSATION:
+${conversation}
 
 QUESTION: ${question}
 
@@ -255,4 +262,23 @@ Answer the question based on the context above. Keep it concise and cite specifi
     answer,
     citations: [],
   };
+}
+
+export async function rewriteWorkoutQuestion(
+  question: string,
+  history: Array<{ role: "user" | "assistant"; content: string }>
+): Promise<string> {
+  if (history.length === 0) return question;
+
+  const rewritten = await generateText({
+    system: `Rewrite a follow-up workout-history question as a standalone retrieval query. Use the previous conversation only to resolve references such as exercises, dates, trainers, and "that session". Do not answer the question, add facts, or include commentary. Return only the rewritten query.`,
+    maxOutputTokens: 180,
+    prompt: `PREVIOUS CONVERSATION:
+${JSON.stringify(history)}
+
+FOLLOW-UP QUESTION:
+${question}`,
+  });
+
+  return rewritten.trim().slice(0, 1_000) || question;
 }

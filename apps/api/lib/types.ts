@@ -315,6 +315,12 @@ export interface ProcessingStatusResponse {
 export interface AssistantQuestionRequest {
   question: string;
   sessionId?: string;
+  history?: AssistantConversationMessage[];
+}
+
+export interface AssistantConversationMessage {
+  role: "user" | "assistant";
+  content: string;
 }
 
 export interface AssistantQuestionResponse {
