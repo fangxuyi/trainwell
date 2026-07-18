@@ -37,7 +37,7 @@ function AskAIContent() {
       const response = await fetch("/api/assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, sessionId }),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();

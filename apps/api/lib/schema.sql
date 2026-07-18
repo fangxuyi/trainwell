@@ -1,5 +1,7 @@
 -- Run once to initialize the Neon database
 
+CREATE EXTENSION IF NOT EXISTS vector;
+
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL DEFAULT 'local',
@@ -47,6 +49,15 @@ CREATE TABLE IF NOT EXISTS audio_segments (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(session_id, sequence)
+);
+
+CREATE TABLE IF NOT EXISTS session_chunks (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  chunk_type TEXT NOT NULL,
+  content TEXT NOT NULL,
+  embedding vector(512),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS transcript_segments (
@@ -119,6 +130,11 @@ CREATE TABLE IF NOT EXISTS billing_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at DESC);
+CREATE INDEX IF NOT EXISTS session_chunks_session_id_idx ON session_chunks(session_id);
+CREATE INDEX IF NOT EXISTS session_chunks_embedding_idx
+  ON session_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 10);
+CREATE INDEX IF NOT EXISTS session_chunks_content_search_idx
+  ON session_chunks USING gin (to_tsvector('english', content));
 CREATE INDEX IF NOT EXISTS idx_audio_segments_session ON audio_segments(session_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_transcript_session ON transcript_segments(session_id);
 CREATE INDEX IF NOT EXISTS idx_processing_jobs_session ON processing_jobs(session_id);

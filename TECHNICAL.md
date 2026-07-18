@@ -118,21 +118,25 @@ The pipeline makes the following model/service calls:
 3. **Boundary protection:** each long-session window receives up to 90 seconds of adjacent context. The prompt allows that context to identify continuity but explicitly prohibits extracting evidence from it, reducing lost or duplicated sets at boundaries.
 4. **Exercise canonicalization and media matching:** no LLM call. Extracted names are deterministically matched against a commit-pinned public GitHub exercise dataset. Low-confidence or ambiguous matches preserve the model’s original name. When `EXERCISE_MEDIA_BASE_URL` is configured, confident matches also receive structured `referenceMedia` metadata resolved against that licensed HTTPS host. Dataset failures are non-fatal.
 5. **Summary:** no additional LLM call. `generateSummaryText()` deterministically formats the merged structured extraction into the compact workout recap.
-6. **Indexing:** one Voyage AI embeddings request batches the generated overview, exercise, and next-plan chunks for pgvector retrieval.
+6. **Review and indexing:** the initial extraction is stored as `review_required` but is not indexed for Ask AI. Finalization saves the user-reviewed exercises and batches the resulting overview, complete exercise-set, and next-plan chunks in one Voyage embeddings request. The finalized status update and chunk replacement commit in one Postgres transaction after embeddings are ready.
 
 Model output is parsed as untrusted JSON. The current parser handles JSON inside or outside Markdown code fences, but runtime schema validation is still limited; malformed structures can fail the pipeline.
 
 ### Ask AI
 
-Ask AI uses retrieval-augmented generation:
+Ask AI uses routed hybrid retrieval over finalized sessions only:
 
-1. Voyage `voyage-3-lite` embeds the question into a 512-dimensional vector.
-2. Postgres/pgvector selects the eight closest chunks belonging to the signed-in user.
-3. The configured language-model provider answers from that retrieved context and is instructed not to add unsupported facts.
+1. Session-scoped and latest-workout questions use exact, user-scoped SQL retrieval.
+2. Progression questions use structured exercise JSON to produce chronological set timelines, maximum weights, completed-set and rep counts, and recorded volume. Relevant semantic chunks supplement those computed facts.
+3. Narrative questions combine Postgres full-text ranking with Voyage `voyage-3-lite` vector similarity. Reciprocal rank fusion merges the lexical and vector candidate lists into eight chunks.
+4. Relative-history questions add a date-bounded SQL session list to semantic results.
+5. The configured language-model provider answers only from this context. The API returns deduplicated session citations alongside the answer.
+
+All retrieval queries join chunks to `sessions`, require the current Clerk `user_id`, and require `remote_status = 'finalized'`. The web session-detail Ask link also passes its session ID so exact-session questions cannot drift into other workouts.
 
 `AI_PROVIDER` selects `anthropic` (the default) or `openai` for both workout extraction and Ask AI. The shared adapter in `apps/api/lib/language-model.ts` keeps prompts and response shapes provider-independent. `ANTHROPIC_MODEL` and `OPENAI_MODEL` are server-only overrides; changing the provider or model does not alter the mobile or web API contract.
 
-If no embeddings exist, the route falls back to the five most recent completed session summaries. The response type includes citations, but the current implementation returns an empty citation array and puts any session references in the answer text.
+If hybrid retrieval finds no matching chunks, the route falls back to the five most recent finalized session records. If Voyage is temporarily unavailable, lexical retrieval remains available.
 
 ## Credits and billing
 
@@ -233,7 +237,7 @@ curl -X POST https://your-api.example/api/admin/migrate \
 
 The migration creates pgvector, embedding tables and indexes, credit and billing tables, and the credit ledger functions.
 
-To index sessions that existed before embeddings were introduced:
+After deploying finalized-only indexing, rebuild every existing finalized session so reviewed corrections and complete set data replace legacy pre-review chunks:
 
 ```bash
 curl -X POST https://your-api.example/api/admin/backfill-embeddings \
@@ -313,13 +317,11 @@ Recording, background sync, upload, Live Activity, and RevenueCat changes requir
 - **Manual upload is not actually manual:** the UI exposes `manual_upload`, but the active-session hook currently queues and starts sync for every mode except `local_only`.
 - **Local-only sessions have no generated content:** there is no on-device transcription or extraction pipeline.
 - **Quick notes are local only:** timestamped notes are not uploaded or included in server extraction.
-- **Review edits do not sync to Postgres:** exercise corrections and finalization update SQLite only; there is no server PATCH flow.
 - **POST and DELETE calls have no timeout:** only the mobile GET helper currently uses an abort timeout.
 - **Terminated-app upload is not guaranteed:** recovery is reliable while the app is active and upon reopening, but iOS does not guarantee that authenticated uploads run while the app is terminated.
 - **Extraction validation is incomplete:** malformed or structurally incomplete model JSON can still fail downstream processing.
 - **Window merge can retain rare duplicates:** adjacent context prevents double-counting from context evidence, but independently extracted primary windows can still identify one boundary-spanning exercise twice.
 - **Exercise media requires separate rights:** the pinned dataset's code and metadata license does not grant downstream use of its Gym visual images or GIFs. Interactive previews remain disabled until a licensed media base URL is configured; every rendered preview retains the dataset attribution.
-- **Ask AI citations are incomplete:** answers may name sessions in prose, but the structured `citations` array is empty.
 - **Live Activity display still needs confirmed device QA.**
 - **iOS billing is deferred:** StoreKit products, RevenueCat offerings, and Apple release credentials are not configured for production.
 

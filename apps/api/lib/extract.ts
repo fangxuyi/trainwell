@@ -241,14 +241,14 @@ export async function answerWorkoutQuestion(
   context: string
 ): Promise<{ answer: string; citations: Array<{ sessionId: string; date: string; excerpt: string }> }> {
   const answer = await generateText({
-    system: `You are a personal training assistant. Answer questions about the user's workout history concisely and accurately. Only state facts that are present in the provided context. Cite the specific session when referencing workout data.`,
+    system: `You are a personal training assistant. Answer questions about the user's workout history concisely and accurately. Treat finalized session records and explicitly labeled computed totals as authoritative. Only state facts that are present in the provided context. Cite the specific session ID and date when referencing workout data. Do not infer facts from missing or unfinalized sessions.`,
     maxOutputTokens: 1024,
     prompt: `WORKOUT HISTORY CONTEXT:
 ${context}
 
 QUESTION: ${question}
 
-Answer the question based on the context above. Keep it concise and cite specific sessions.`,
+Answer the question based on the context above. Keep it concise and cite specific finalized sessions.`,
   });
 
   return {

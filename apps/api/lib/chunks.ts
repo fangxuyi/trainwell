@@ -62,13 +62,24 @@ export function chunkExtraction(
     const completedSets = ex.sets.filter((s) => s.completed);
     if (completedSets.length > 0) {
       lines.push(`Sets completed: ${completedSets.length}`);
-      const firstSet = completedSets[0];
-      if (firstSet?.completedReps != null) lines.push(`Reps: ${firstSet.completedReps}`);
-      if (firstSet?.weight) lines.push(`Weight: ${firstSet.weight.value}${firstSet.weight.unit}`);
+      completedSets.forEach((set, index) => {
+        const details = [
+          set.setType && set.setType !== "unknown" ? set.setType : null,
+          set.completedReps != null ? `${set.completedReps} reps` : null,
+          set.weight ? `${set.weight.value}${set.weight.unit}` : null,
+          set.duration ? `${set.duration.value}${set.duration.unit}` : null,
+          set.distance ? `${set.distance.value}${set.distance.unit}` : null,
+          set.resistance ? `resistance ${set.resistance}` : null,
+          set.rpe != null ? `RPE ${set.rpe}` : null,
+          set.formQuality && set.formQuality !== "unknown" ? `form ${set.formQuality}` : null,
+        ].filter(Boolean);
+        lines.push(`Set ${set.setNumber || index + 1}: ${details.join(", ") || "completed"}`);
+      });
     }
 
     const notes = [
       ...ex.techniqueNotes.map((n) => n.text),
+      ...ex.userNotes.map((n) => n.text),
       ...ex.trainerNotes.map((n) => n.text),
     ];
     if (notes.length > 0) lines.push(`Cues: ${notes.join("; ")}`);
@@ -77,6 +88,10 @@ export function chunkExtraction(
       lines.push(
         `Discomfort: ${ex.painObservations.map((p) => `${p.bodyPart ?? ""} ${p.description}`).join("; ")}`
       );
+    }
+
+    if (ex.progressionSuggestion?.text) {
+      lines.push(`Progression suggestion: ${ex.progressionSuggestion.text}`);
     }
 
     chunks.push({

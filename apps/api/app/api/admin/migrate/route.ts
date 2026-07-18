@@ -36,6 +36,11 @@ export async function POST(req: NextRequest) {
   `;
 
   await sql`
+    CREATE INDEX IF NOT EXISTS session_chunks_content_search_idx
+      ON session_chunks USING gin (to_tsvector('english', content))
+  `;
+
+  await sql`
     CREATE TABLE IF NOT EXISTS credit_accounts (
       user_id TEXT PRIMARY KEY,
       permanent_credits INTEGER NOT NULL DEFAULT 100 CHECK (permanent_credits >= 0),
