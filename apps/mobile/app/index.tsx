@@ -174,6 +174,23 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
 
+            <TouchableOpacity
+              style={styles.measurementCard}
+              onPress={() => router.push("/measurements")}
+            >
+              <View style={styles.measurementIcon}>
+                <View style={styles.measurementLineLong} />
+                <View style={styles.measurementLineShort} />
+                <View style={styles.measurementLineLong} />
+              </View>
+              <View style={styles.measurementContent}>
+                <Text style={styles.measurementEyebrow}>BODY PROGRESS</Text>
+                <Text style={styles.measurementTitle}>Measurements</Text>
+                <Text style={styles.measurementBody}>Track waist, chest, limbs, and custom areas.</Text>
+              </View>
+              <Text style={styles.measurementArrow}>→</Text>
+            </TouchableOpacity>
+
             <View style={styles.sectionHeader}>
               <View>
                 <Text style={styles.sectionEyebrow}>YOUR PROGRESS</Text>
@@ -302,7 +319,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   heroActionArrow: { color: colors.accent, fontSize: 22, fontWeight: "700" },
-  utilityRow: { flexDirection: "row", gap: 12, marginBottom: 34 },
+  utilityRow: { flexDirection: "row", gap: 12, marginBottom: 12 },
   aiCard: {
     flex: 1.18,
     minHeight: 174,
@@ -331,6 +348,35 @@ const styles = StyleSheet.create({
   balanceFooter: { marginTop: "auto", flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   balancePlan: { color: colors.accent, fontSize: 10, fontWeight: "800" },
   balanceArrow: { color: colors.accent, fontSize: 17 },
+  measurementCard: {
+    minHeight: 104,
+    borderRadius: radii.large,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 34,
+  },
+  measurementIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 18,
+    backgroundColor: colors.accentDark,
+    borderWidth: 1,
+    borderColor: "rgba(199, 243, 107, 0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+  },
+  measurementLineLong: { width: 23, height: 2, borderRadius: 1, backgroundColor: colors.accent },
+  measurementLineShort: { width: 14, height: 2, borderRadius: 1, backgroundColor: colors.accent },
+  measurementContent: { flex: 1, marginLeft: 14 },
+  measurementEyebrow: { color: colors.accent, fontSize: 8, fontWeight: "900", letterSpacing: 1.2 },
+  measurementTitle: { color: colors.text, fontSize: 18, fontWeight: "900", marginTop: 4 },
+  measurementBody: { color: colors.textMuted, fontSize: 10, lineHeight: 15, marginTop: 4 },
+  measurementArrow: { color: colors.accent, fontSize: 20, marginLeft: 10 },
   sectionHeader: {
     flexDirection: "row",
     alignItems: "flex-end",

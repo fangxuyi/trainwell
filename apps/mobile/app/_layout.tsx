@@ -14,6 +14,7 @@ import { colors } from "../src/ui/theme";
 import { claimLegacySessions } from "../src/db/sessions";
 import { setCurrentUserId } from "../src/auth/currentUser";
 import { resolveBetaAccess, subscribeToBetaAccess } from "../src/auth/betaAccess";
+import { syncBodyMeasurements } from "../src/db/bodyMeasurements";
 
 const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
 const FOREGROUND_RECOVERY_INTERVAL_MS = 30_000;
@@ -101,7 +102,7 @@ function RootNavigator() {
       if (AppState.currentState !== "active") return;
       const state = await Network.getNetworkStateAsync();
       if (state.isConnected === false || state.isInternetReachable === false) return;
-      await runSyncRecovery();
+      await Promise.all([runSyncRecovery(), syncBodyMeasurements()]);
     };
 
     recoverIfOnline().catch(console.error);
@@ -169,6 +170,7 @@ function RootNavigator() {
       <Stack.Screen name="history/index" options={{ headerShown: false }} />
       <Stack.Screen name="review/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="ask" options={{ headerShown: false }} />
+      <Stack.Screen name="measurements" options={{ headerShown: false }} />
       <Stack.Screen name="credits" options={{ title: "Credits" }} />
     </Stack>
   );
