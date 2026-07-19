@@ -4,6 +4,29 @@ Motion Memo turns a recorded personal-training session into a useful workout his
 
 The iPhone app is the primary experience. A companion web portal lets you revisit sessions, ask questions about your history, and manage credits from a browser.
 
+## OpenAI Build Week
+
+Motion Memo existed before OpenAI Build Week as an early mobile and web workout-recording product. Before the submission period, the repository already included continuous recording, Clerk authentication, user-scoped API routes, retryable Vercel Blob uploads, transcription, and an initial windowed workout-extraction pipeline.
+
+During Build Week, the project was meaningfully extended into the current product:
+
+- Refined structured workout extraction, preserved context across transcript windows, and added deterministic exercise-name matching.
+- Added editable review and finalization, including exercises, sets, reps, weights, and trainer cues.
+- Rebuilt Ask AI around finalized records, user-scoped SQL plus pgvector hybrid retrieval, and multi-round conversations.
+- Added credits, Stripe billing, RevenueCat integration scaffolding, body measurements, and private-beta invitation support.
+- Hardened interrupted-recording recovery, background synchronization, uploads, processing retries, and finalization consistency.
+- Refreshed the mobile app, recording screen, Live Activity, secondary screens, web portal, and product identity as Motion Memo.
+
+Representative Build Week pull requests include [hybrid finalized-record retrieval](https://github.com/fangxuyi/trainwell/pull/44), [multi-round Ask AI](https://github.com/fangxuyi/trainwell/pull/46), [editable workout review](https://github.com/fangxuyi/trainwell/pull/53), [processing reliability](https://github.com/fangxuyi/trainwell/pull/52), and the [Motion Memo rebrand](https://github.com/fangxuyi/trainwell/pull/54). The repository history provides the complete dated implementation record.
+
+### How Codex contributed
+
+Codex served as an engineering partner across product planning, repository analysis, implementation, debugging, validation, and delivery. It helped trace the local-first recording and synchronization flows, propose implementation plans, update the mobile app and server APIs together, keep shared schemas aligned, and deliver focused pull requests. Important decisions made through this collaboration included preserving on-device state before network work, uploading recordings through presigned Blob URLs, indexing only finalized user-reviewed records, and using the existing Neon Postgres and pgvector stack for hybrid retrieval rather than introducing another search service.
+
+### How GPT-5.6 is used
+
+The Build Week deployment uses the OpenAI provider implemented in `apps/api/lib/language-model.ts`, which defaults to `gpt-5.6-terra`. GPT-5.6 converts workout transcripts into structured exercise and coaching data, answers questions over retrieved finalized workout records, and rewrites contextual follow-up questions into standalone retrieval queries. Retrieval remains deterministic and grounded: authenticated SQL and pgvector select only the signed-in user’s finalized records, then GPT-5.6 generates an answer from that supplied context. Model output is treated as untrusted and reviewed workout corrections remain authoritative.
+
 ## From workout to workout history
 
 1. **Sign in and start a workout** — choose the workout type, optionally add your trainer and goal, and begin recording.
@@ -76,3 +99,30 @@ Motion Memo is a training log and reflection tool, not a medical diagnostic serv
 Motion Memo is under active development and currently focuses on iOS. Core recording, transcription, structured summaries, workout and body-measurement history, authenticated web access, AI questions, credits, and Stripe billing are implemented. Mobile App Store purchases and several recovery and synchronization edge cases remain release work.
 
 For architecture, setup, environment variables, validation commands, and known limitations, see [TECHNICAL.md](TECHNICAL.md).
+
+## Run locally
+
+Prerequisites include Node.js, npm, Xcode for iOS, and configured service credentials described in [TECHNICAL.md](TECHNICAL.md). Never commit local `.env` files or server secrets.
+
+```bash
+npm install
+
+cp apps/api/.env.example apps/api/.env
+npm run api
+
+cp apps/mobile/.env.example apps/mobile/.env
+npm run mobile
+```
+
+The web portal runs at `http://localhost:3000` by default. Native recording, Live Activities, and RevenueCat require an iOS development or release build rather than Expo Go.
+
+Validate relevant changes with:
+
+```bash
+npm run typecheck
+npm run lint --workspace=apps/api
+npm run build --workspace=apps/api
+cd apps/mobile && npx tsc --noEmit
+```
+
+The deployed portal is available at [api-ebon-mu-79.vercel.app](https://api-ebon-mu-79.vercel.app/). Judge credentials, when needed, should be supplied privately through the Devpost testing instructions rather than committed to this public repository.
