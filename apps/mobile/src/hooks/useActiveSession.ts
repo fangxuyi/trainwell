@@ -61,7 +61,6 @@ export function useActiveSession(): ActiveSession {
       const secs = recorder.getElapsedSeconds();
       setElapsed(secs);
       setChunkCount(recorder.getChunkCount());
-      updateLiveActivity(Math.round(secs)).catch(() => {});
     }, 1000);
   }, []);
 
@@ -128,6 +127,9 @@ export function useActiveSession(): ActiveSession {
   const pause = useCallback(async () => {
     if (!session || state !== "recording") return;
     await recorder.pause();
+    const pausedAt = recorder.getElapsedSeconds();
+    setElapsed(pausedAt);
+    updateLiveActivity(Math.round(pausedAt), false).catch(() => {});
     await updateSessionStatus(session.id, { localStatus: "paused" });
     const updated = await getSessionById(session.id);
     setSession(updated);
@@ -138,6 +140,7 @@ export function useActiveSession(): ActiveSession {
   const resume = useCallback(async () => {
     if (!session || state !== "paused") return;
     await recorder.resume();
+    updateLiveActivity(Math.round(recorder.getElapsedSeconds()), true).catch(() => {});
     await updateSessionStatus(session.id, { localStatus: "recording" });
     const updated = await getSessionById(session.id);
     setSession(updated);
@@ -151,10 +154,10 @@ export function useActiveSession(): ActiveSession {
     stopTick();
 
     const endedAt = now();
-    const durationSeconds = Math.round(elapsed);
+    const durationSeconds = Math.round(recorder.getElapsedSeconds());
 
     await recorder.stop();
-    endLiveActivity().catch(() => {});
+    endLiveActivity(durationSeconds).catch(() => {});
     await updateSessionStatus(session.id, {
       localStatus: "locally_complete",
       remoteStatus: "not_created",
@@ -175,7 +178,7 @@ export function useActiveSession(): ActiveSession {
     setElapsed(0);
     setChunkCount(0);
     return updated;
-  }, [session, elapsed, stopTick]);
+  }, [session, stopTick]);
 
   const addNote = useCallback(
     async (text: string): Promise<QuickNote> => {

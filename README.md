@@ -18,8 +18,8 @@ The iPhone app is the primary experience. A companion web portal lets you revisi
 ### Record naturally
 
 - Continuous workout recording, including background recording on iOS.
-- Pause and resume controls, elapsed time, audio activity, and quick notes.
-- Lock-screen recording status, with Live Activity and Dynamic Island integration awaiting final device confirmation on supported iPhones.
+- A modern live-workout screen with elapsed time, audio activity, local-save status, session context, pause/resume controls, and timestamped quick notes.
+- Branded lock-screen and Dynamic Island Live Activity views with a system-updating timer and distinct recording and paused states; final device confirmation remains required on supported iPhones.
 - Local-first storage, so a connection is not required while you train.
 - Local audio-retention choices for keeping recordings or deleting them after processing or review.
 

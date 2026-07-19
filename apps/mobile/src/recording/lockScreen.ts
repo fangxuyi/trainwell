@@ -28,13 +28,13 @@ export async function showRecordingNotification(elapsedSeconds: number) {
   await Notifications.scheduleNotificationAsync({
     identifier: NOTIFICATION_ID,
     content: {
-      title: "Trainwell — Recording",
-      body: formatDuration(Math.round(elapsedSeconds)),
+      title: "Workout in progress",
+      body: `Trainwell  ·  ${formatDuration(Math.round(elapsedSeconds))}`,
       sound: false,
       ...(Platform.OS === "android" && {
         channelId: CHANNEL_ID,
         ongoing: true,
-        color: "#38BDF8",
+        color: "#C7F36B",
       }),
     },
     trigger: null,
