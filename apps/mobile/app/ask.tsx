@@ -190,7 +190,12 @@ function EmptyConversation({ onSelect }: { onSelect: (question: string) => void 
 function MessageBubble({ message }: { message: Message }) {
   const fromUser = message.role === "user";
   return (
-    <View style={[styles.messageGroup, fromUser && styles.userMessageGroup]}>
+    <View
+      style={[
+        styles.messageGroup,
+        fromUser ? styles.userMessageGroup : styles.assistantMessageGroup,
+      ]}
+    >
       <Text style={[styles.messageLabel, fromUser && styles.userMessageLabel]}>
         {fromUser ? "YOU" : "MOTION MEMO"}
       </Text>
@@ -291,8 +296,9 @@ const styles = StyleSheet.create({
   },
   promptText: { color: colors.text, fontSize: 13, fontWeight: "700", flex: 1, paddingRight: 12 },
   promptArrow: { color: colors.accent, fontSize: 18 },
-  messageGroup: { alignSelf: "flex-start", maxWidth: "88%", marginBottom: 17 },
-  userMessageGroup: { alignSelf: "flex-end", alignItems: "flex-end" },
+  messageGroup: { marginBottom: 17 },
+  assistantMessageGroup: { alignSelf: "stretch", marginRight: "12%" },
+  userMessageGroup: { alignSelf: "flex-end", alignItems: "flex-end", maxWidth: "88%" },
   messageLabel: { color: colors.violet, fontSize: 8, fontWeight: "900", letterSpacing: 1.2, marginBottom: 6, marginLeft: 4 },
   userMessageLabel: { color: colors.accent, marginLeft: 0, marginRight: 4 },
   bubble: { borderRadius: 20, paddingHorizontal: 15, paddingVertical: 13 },
