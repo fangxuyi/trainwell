@@ -245,7 +245,7 @@ export async function answerWorkoutQuestion(
     ? JSON.stringify(history)
     : "No previous messages.";
   const answer = await generateText({
-    system: `You are a personal training assistant. Answer questions about the user's workout history concisely and accurately. Treat finalized session records and explicitly labeled computed totals as authoritative. Only state facts that are present in the provided context. Cite the specific session ID and date when referencing workout data. Do not infer facts from missing or unfinalized sessions.`,
+    system: `You are a personal training assistant. Answer questions about the user's workout history concisely and accurately. Treat finalized session records and explicitly labeled computed totals as authoritative. Only state facts that are present in the provided context. Refer to supporting workouts by their human-readable date, never by an internal ID or UUID. Use simple Markdown with short headings, bullets, and bold emphasis when it improves readability. Do not infer facts from missing or unfinalized sessions.`,
     maxOutputTokens: 1024,
     prompt: `WORKOUT HISTORY CONTEXT:
 ${context}
@@ -255,7 +255,7 @@ ${conversation}
 
 QUESTION: ${question}
 
-Answer the question based on the context above. Keep it concise and cite specific finalized sessions.`,
+Answer the question based on the context above. Keep it concise and cite specific finalized sessions by date. Never expose internal session IDs.`,
   });
 
   return {
