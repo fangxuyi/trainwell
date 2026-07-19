@@ -118,12 +118,14 @@ Groq’s default per-file guard is 25 MB and can be changed with `GROQ_MAX_AUDIO
 
 Processing is triggered through `/api/workouts/[id]/process`. The route marks the session `processing`, returns immediately, and uses Next.js `after()` to continue the pipeline within the Vercel function lifetime.
 
+The processing function requests a 300-second maximum duration, which is supported by the project's Vercel Hobby account while Fluid Compute is enabled. Pipeline logs record start, completion, failure, and duration for transcript loading, model extraction, exercise canonicalization, session loading, summary generation, persistence, and the overall run.
+
 The pipeline makes the following model/service calls:
 
 1. **Transcription:** one Groq Whisper call for the current single audio file.
 2. **Structured extraction:** one call to the configured language-model provider for shorter sessions. Long sessions are divided into approximately 15-minute primary windows and extracted with parallel provider calls.
 3. **Boundary protection:** each long-session window receives up to 90 seconds of adjacent context. The prompt allows that context to identify continuity but explicitly prohibits extracting evidence from it, reducing lost or duplicated sets at boundaries.
-4. **Exercise canonicalization and media matching:** no LLM call. Extracted names are deterministically matched against a commit-pinned public GitHub exercise dataset. Low-confidence or ambiguous matches preserve the model’s original name. When `EXERCISE_MEDIA_BASE_URL` is configured, confident matches also receive structured `referenceMedia` metadata resolved against that licensed HTTPS host. Dataset failures are non-fatal.
+4. **Exercise canonicalization and media matching:** no LLM call. Extracted names are deterministically matched against a commit-pinned public GitHub exercise dataset. The dataset begins loading in parallel with model extraction; only the compact matching fields are retained in the shared Next.js data cache and warm-instance memory. Low-confidence or ambiguous matches preserve the model’s original name. When `EXERCISE_MEDIA_BASE_URL` is configured, confident matches also receive structured `referenceMedia` metadata resolved against that licensed HTTPS host. Dataset failures are non-fatal.
 5. **Summary:** no additional LLM call. `generateSummaryText()` deterministically formats the merged structured extraction into the compact workout recap.
 6. **Review and indexing:** the initial extraction is stored as `review_required` but is not indexed for Ask AI. Finalization saves the user-reviewed exercises and batches the resulting overview, complete exercise-set, and next-plan chunks in one Voyage embeddings request. The finalized status update and chunk replacement commit in one Postgres transaction after embeddings are ready.
 
