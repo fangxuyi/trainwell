@@ -192,7 +192,7 @@ function MessageBubble({ message }: { message: Message }) {
   return (
     <View style={[styles.messageGroup, fromUser && styles.userMessageGroup]}>
       <Text style={[styles.messageLabel, fromUser && styles.userMessageLabel]}>
-        {fromUser ? "YOU" : "TRAINWELL"}
+        {fromUser ? "YOU" : "MOTION MEMO"}
       </Text>
       <View style={[styles.bubble, fromUser ? styles.userBubble : styles.aiBubble]}>
         {fromUser ? (

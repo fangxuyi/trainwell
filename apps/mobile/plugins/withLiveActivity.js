@@ -97,7 +97,7 @@ struct TrainwellLiveActivityWidget: Widget {
                     .frame(width: 42, height: 42)
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("TRAINWELL")
+                        Text("MOTION MEMO")
                             .font(.system(size: 9, weight: .black))
                             .tracking(1.5)
                             .foregroundColor(TrainwellPalette.lime)
@@ -150,7 +150,7 @@ struct TrainwellLiveActivityWidget: Widget {
                                 .foregroundColor(context.state.isRecording ? TrainwellPalette.lime : TrainwellPalette.warning)
                         }
                         .frame(width: 31, height: 31)
-                        Text("TRAINWELL")
+                        Text("MOTION MEMO")
                             .font(.system(size: 9, weight: .black))
                             .tracking(1.1)
                             .foregroundColor(TrainwellPalette.lime)

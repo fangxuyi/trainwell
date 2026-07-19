@@ -1,10 +1,12 @@
-# Trainwell Technical Reference
+# Motion Memo Technical Reference
 
 This document describes the current implementation, operational setup, and known limitations. For the product overview, see [README.md](README.md).
 
 ## System overview
 
-Trainwell is a TypeScript monorepo with three primary workspaces:
+Motion Memo is a TypeScript monorepo with three primary workspaces:
+
+The product was originally named Trainwell. Legacy technical identifiers—including the `@trainwell/schemas` package, `trainwell` URL scheme, `com.trainwell.app` bundle IDs, `trainwell.db` SQLite filename, and Live Activity type and widget target names—remain intentionally unchanged to preserve compatibility, installed-app identity, local data, deep links, signing, and billing integrations.
 
 ```text
 apps/mobile        Expo / React Native iOS app
@@ -153,7 +155,7 @@ If hybrid retrieval finds no matching chunks, the route falls back to the five m
 
 ### Private beta invitations
 
-`BETA_INVITE_REQUIRED=true` enables a temporary access gate after Clerk authentication. Clerk remains the identity provider, but newly authenticated users cannot enter portal pages or use authenticated application APIs until they redeem a Trainwell invitation code. Web and mobile provide dedicated `/invite` screens. Mobile caches a successful entitlement in SecureStore so approved beta users retain local access offline; server APIs continue enforcing the database entitlement.
+`BETA_INVITE_REQUIRED=true` enables a temporary access gate after Clerk authentication. Clerk remains the identity provider, but newly authenticated users cannot enter portal pages or use authenticated application APIs until they redeem a Motion Memo invitation code. Web and mobile provide dedicated `/invite` screens. Mobile caches a successful entitlement in SecureStore so approved beta users retain local access offline; server APIs continue enforcing the database entitlement.
 
 Invitation codes are generated through `/api/admin/invitation-codes`, protected by `ADMIN_SECRET`. Only a SHA-256 hash is stored. Codes support labels, expiration timestamps, and maximum redemption counts. Redemption atomically claims remaining capacity and grants one `beta_access_users` row per Clerk user. The migration grants `existing_user` access to every current session or credit-account owner before the gate is enabled.
 
@@ -248,7 +250,7 @@ npx expo run:ios
 
 Expo Go is insufficient for the complete app because it cannot load the custom native Live Activity and RevenueCat integration.
 
-For a standalone device build, use a Release configuration. If command-line provisioning cannot sign the widget extension, open `apps/mobile/ios/Trainwell.xcworkspace` in Xcode and let Xcode manage the profiles.
+For a standalone device build, use a Release configuration. If command-line provisioning cannot sign the widget extension, open `apps/mobile/ios/MotionMemo.xcworkspace` in Xcode and let Xcode manage the profiles.
 
 ### EAS preview build
 

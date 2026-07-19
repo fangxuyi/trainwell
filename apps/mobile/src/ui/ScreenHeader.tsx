@@ -28,7 +28,7 @@ export function ScreenHeader({
         >
           <Text style={styles.backIcon}>‹</Text>
         </TouchableOpacity>
-        <Text style={styles.brand}>TRAINWELL</Text>
+        <Text style={styles.brand}>MOTION MEMO</Text>
         <View style={styles.action}>{action}</View>
       </View>
       <Text style={styles.eyebrow}>{eyebrow}</Text>

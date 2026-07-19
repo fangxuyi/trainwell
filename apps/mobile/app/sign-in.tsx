@@ -66,7 +66,7 @@ export default function SignInScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Trainwell</Text>
+      <Text style={styles.title}>Motion Memo</Text>
       <Text style={styles.subtitle}>Sign in to your account</Text>
 
       <TextInput

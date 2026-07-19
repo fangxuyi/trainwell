@@ -1,6 +1,6 @@
-# Trainwell
+# Motion Memo
 
-Trainwell turns a recorded personal-training session into a useful workout history. Record while you train, then get a structured recap of exercises, sets, weights, coaching cues, accomplishments, discomfort notes, and ideas for the next session.
+Motion Memo turns a recorded personal-training session into a useful workout history. Record while you train, then get a structured recap of exercises, sets, weights, coaching cues, accomplishments, discomfort notes, and ideas for the next session.
 
 The iPhone app is the primary experience. A companion web portal lets you revisit sessions, ask questions about your history, and manage credits from a browser.
 
@@ -8,7 +8,7 @@ The iPhone app is the primary experience. A companion web portal lets you revisi
 
 1. **Sign in and start a workout** — choose the workout type, optionally add your trainer and goal, and begin recording.
 2. **Train without babysitting the app** — recording continues as one session while the phone is locked or another app is open. You can pause, resume, and add timestamped notes.
-3. **End the session safely** — Trainwell saves the recording on the phone first. If you are offline, it waits and retries when you reconnect.
+3. **End the session safely** — Motion Memo saves the recording on the phone first. If you are offline, it waits and retries when you reconnect.
 4. **Receive an AI workout recap** — the recording is transcribed and converted into exercises, completed sets, reps, weights, trainer cues, session themes, accomplishments, discomfort observations, and a next-session plan.
 5. **Review before finalizing** — correct exercise names, reps, or weights instead of treating AI output as unquestionable.
 6. **Build on your history** — browse past workouts or ask questions such as “How has my squat changed?” and “What cues did my trainer give me?”
@@ -69,10 +69,10 @@ Mobile App Store billing is implemented through RevenueCat but is not yet live b
 - Upload and processing work is retryable, and the server can finish processing while the app is closed.
 - Ask AI retrieves context only from the current user’s workout history.
 
-Trainwell is a training log and reflection tool, not a medical diagnostic service. Pain and discomfort mentioned during a workout are recorded as observations, not diagnoses.
+Motion Memo is a training log and reflection tool, not a medical diagnostic service. Pain and discomfort mentioned during a workout are recorded as observations, not diagnoses.
 
 ## Project status
 
-Trainwell is under active development and currently focuses on iOS. Core recording, transcription, structured summaries, workout and body-measurement history, authenticated web access, AI questions, credits, and Stripe billing are implemented. Mobile App Store purchases and several recovery and synchronization edge cases remain release work.
+Motion Memo is under active development and currently focuses on iOS. Core recording, transcription, structured summaries, workout and body-measurement history, authenticated web access, AI questions, credits, and Stripe billing are implemented. Mobile App Store purchases and several recovery and synchronization edge cases remain release work.
 
 For architecture, setup, environment variables, validation commands, and known limitations, see [TECHNICAL.md](TECHNICAL.md).

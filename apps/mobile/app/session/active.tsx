@@ -193,7 +193,7 @@ export default function ActiveSessionScreen() {
       <View style={styles.screen}>
         <View style={styles.topBar}>
           <View>
-            <Text style={styles.brand}>TRAINWELL</Text>
+            <Text style={styles.brand}>MOTION MEMO</Text>
             <Text style={styles.topCaption}>LIVE WORKOUT</Text>
           </View>
           <View style={[styles.statusPill, isPaused && styles.statusPillPaused]}>

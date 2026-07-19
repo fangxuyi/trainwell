@@ -120,7 +120,7 @@ function AskAIContent() {
       <header className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="eyebrow">Training intelligence</p>
-          <h1 className="page-title mt-2 text-4xl font-black text-[#F5F7FA] sm:text-5xl">Ask Trainwell</h1>
+          <h1 className="page-title mt-2 text-4xl font-black text-[#F5F7FA] sm:text-5xl">Ask Motion Memo</h1>
           <p className="mt-3 text-sm text-[#9CA7B8]">Explore patterns, coaching cues, and progress across your own workout history.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

@@ -84,7 +84,7 @@ export function AccountDrawer({ visible, balance, onClose }: AccountDrawerProps)
       <View style={styles.modalRoot}>
         <View style={[styles.panel, { width: Math.min(width * 0.88, 360) }]}>
           <View style={styles.drawerHeader}>
-            <Text style={styles.brand}>TRAINWELL</Text>
+            <Text style={styles.brand}>MOTION MEMO</Text>
             <TouchableOpacity
               accessibilityRole="button"
               accessibilityLabel="Close account menu"
@@ -97,7 +97,7 @@ export function AccountDrawer({ visible, balance, onClose }: AccountDrawerProps)
 
           <View style={styles.identityRow}>
             <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{initials || "TW"}</Text>
+              <Text style={styles.avatarText}>{initials || "MM"}</Text>
             </View>
             <View style={styles.identityText}>
               <Text style={styles.name} numberOfLines={1}>{displayName}</Text>
@@ -150,7 +150,7 @@ export function AccountDrawer({ visible, balance, onClose }: AccountDrawerProps)
             <Text style={styles.menuLabel}>QUICK LINKS</Text>
             <DrawerItem title="Credits & plans" detail="Balance and purchases" onPress={() => navigate("/credits")} />
             <DrawerItem title="Workout history" detail="All recorded sessions" onPress={() => navigate("/history")} />
-            <DrawerItem title="Ask Trainwell" detail="Search your training history" onPress={() => navigate("/ask")} />
+            <DrawerItem title="Ask Motion Memo" detail="Search your training history" onPress={() => navigate("/ask")} />
           </View>
 
           <View style={styles.footer}>
