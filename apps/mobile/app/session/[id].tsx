@@ -243,7 +243,9 @@ export default function SessionDetailScreen() {
                 repValues.length > 0 ? `${repValues.join("/")} reps` : null,
                 weightValues.length > 0 ? [...new Set(weightValues)].join("/") : null,
               ].filter((detail): detail is string => !!detail);
-              const cue = exercise.techniqueNotes.find((note) => note.text.trim())?.text.trim();
+              const cue = exercise.techniqueNotes
+                ?.map((note) => (typeof note?.text === "string" ? note.text.trim() : ""))
+                .find(Boolean);
               return (
                 <View key={exerciseKey} style={styles.exerciseRow}>
                   <View style={styles.exerciseHeader}>
