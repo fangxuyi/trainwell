@@ -82,9 +82,10 @@ function cleanedExercises(exercises: ExerciseRecord[]): ExerciseRecord[] {
       completed: true,
       confidence: 1,
     })),
-    techniqueNotes: exercise.techniqueNotes
-      .map((note) => ({ ...note, text: note.text.trim() }))
-      .filter((note) => note.text.length > 0),
+    techniqueNotes: (exercise.techniqueNotes ?? []).flatMap((note) => {
+      const text = typeof note?.text === "string" ? note.text.trim() : "";
+      return text ? [{ ...note, text }] : [];
+    }),
   }));
 }
 

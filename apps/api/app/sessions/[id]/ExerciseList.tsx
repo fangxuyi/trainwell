@@ -12,7 +12,9 @@ export default function ExerciseList({ exercises }: { exercises: ExerciseRecord[
       {exercises.map((exercise, index) => {
         const completedSets = exercise.sets.filter((set) => set.completed);
         const firstWeight = completedSets.find((set) => set.weight)?.weight;
-        const cue = exercise.techniqueNotes.find((note) => note.text.trim())?.text.trim();
+        const cue = exercise.techniqueNotes
+          ?.map((note) => (typeof note?.text === "string" ? note.text.trim() : ""))
+          .find(Boolean);
         const exerciseKey = exercise.id || String(index);
         const isPreviewing = activeExerciseId === exerciseKey;
 
