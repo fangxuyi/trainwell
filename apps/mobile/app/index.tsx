@@ -111,7 +111,7 @@ export default function HomeScreen() {
           <>
             <View style={styles.topBar}>
               <View>
-                <Text style={styles.brand}>TRAINWELL</Text>
+                <Text style={styles.brand}>MOTION MEMO</Text>
                 <Text style={styles.greeting}>{greeting()}, {firstName}</Text>
               </View>
               <TouchableOpacity
@@ -209,7 +209,7 @@ export default function HomeScreen() {
             <View style={styles.emptyCard}>
               <Text style={styles.emptyNumber}>01</Text>
               <Text style={styles.emptyTitle}>Your first session starts here.</Text>
-              <Text style={styles.emptyBody}>Record a workout and Trainwell will build your history automatically.</Text>
+              <Text style={styles.emptyBody}>Record a workout and Motion Memo will build your history automatically.</Text>
             </View>
           )
         }

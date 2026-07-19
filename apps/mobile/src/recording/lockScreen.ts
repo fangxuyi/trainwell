@@ -29,7 +29,7 @@ export async function showRecordingNotification(elapsedSeconds: number) {
     identifier: NOTIFICATION_ID,
     content: {
       title: "Workout in progress",
-      body: `Trainwell  ·  ${formatDuration(Math.round(elapsedSeconds))}`,
+      body: `Motion Memo  ·  ${formatDuration(Math.round(elapsedSeconds))}`,
       sound: false,
       ...(Platform.OS === "android" && {
         channelId: CHANNEL_ID,

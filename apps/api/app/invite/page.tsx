@@ -33,7 +33,7 @@ export default function InvitePage() {
         <p className="eyebrow">Private beta</p>
         <h1 className="page-title mt-3 text-4xl font-black text-[#F5F7FA]">You’re invited to train.</h1>
         <p className="mt-4 text-sm leading-6 text-[#9CA7B8]">
-          Trainwell is currently available to invited beta testers. Enter your code to unlock the app.
+          Motion Memo is currently available to invited beta testers. Enter your code to unlock the app.
         </p>
         <input
           value={code}
@@ -52,7 +52,7 @@ export default function InvitePage() {
           disabled={!code.trim() || busy}
           className="mt-4 w-full rounded-2xl bg-[#C7F36B] px-5 py-4 text-sm font-black text-[#101707] transition hover:bg-[#D3FA80] disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {busy ? "Checking code…" : "Unlock Trainwell"}
+          {busy ? "Checking code…" : "Unlock Motion Memo"}
         </button>
       </section>
     </div>

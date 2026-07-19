@@ -85,7 +85,7 @@ export default async function SessionsPage() {
           <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-[#C7F36B]/10 text-2xl text-[#C7F36B]">01</div>
           <h2 className="mt-5 text-xl font-black">Your first session starts on mobile.</h2>
           <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[#667085]">
-            Record a workout in the Trainwell app and your structured history will appear here automatically.
+            Record a workout in Motion Memo and your structured history will appear here automatically.
           </p>
         </div>
       ) : (

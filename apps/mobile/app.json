@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Trainwell",
+    "name": "Motion Memo",
     "slug": "trainwell",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -17,7 +17,7 @@
       "bundleIdentifier": "com.trainwell.app",
       "teamId": "N8MPUT5VUU",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Trainwell records your workout sessions to transcribe and summarize them.",
+        "NSMicrophoneUsageDescription": "Motion Memo records your workout sessions to transcribe and summarize them.",
         "UIBackgroundModes": [
           "audio"
         ]

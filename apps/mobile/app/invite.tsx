@@ -53,7 +53,7 @@ export default function InviteScreen() {
           <Text style={styles.eyebrow}>PRIVATE BETA</Text>
           <Text style={styles.title}>You’re invited to train.</Text>
           <Text style={styles.subtitle}>
-            Trainwell is currently available to invited beta testers. Enter your code to unlock the app.
+            Motion Memo is currently available to invited beta testers. Enter your code to unlock the app.
           </Text>
           <TextInput
             style={styles.input}
@@ -74,7 +74,7 @@ export default function InviteScreen() {
           >
             {busy
               ? <ActivityIndicator color={colors.accentText} />
-              : <Text style={styles.buttonText}>Unlock Trainwell</Text>}
+              : <Text style={styles.buttonText}>Unlock Motion Memo</Text>}
           </TouchableOpacity>
         </View>
         <TouchableOpacity

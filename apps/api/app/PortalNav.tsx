@@ -20,7 +20,7 @@ export function PortalNav() {
       <nav className="mx-auto flex h-[4.5rem] max-w-6xl items-center gap-4 px-4 sm:px-6">
         <Link href="/sessions" className="group flex shrink-0 items-center gap-3">
           <Image
-            src="/trainwell-icon.svg"
+            src="/motion-memo-icon.svg"
             alt=""
             width={36}
             height={36}
@@ -28,8 +28,8 @@ export function PortalNav() {
             className="size-9 rounded-[13px] shadow-[0_0_30px_rgba(199,243,107,0.14)]"
           />
           <span className="hidden sm:block">
-            <span className="block text-[0.68rem] font-black tracking-[0.22em] text-[#C7F36B]">TRAINWELL</span>
-            <span className="mt-0.5 block text-[0.63rem] font-medium text-[#667085]">Training intelligence</span>
+            <span className="block text-[0.68rem] font-black tracking-[0.22em] text-[#C7F36B]">MOTION MEMO</span>
+            <span className="mt-0.5 block text-[0.63rem] font-medium text-[#667085]">Your workouts, remembered</span>
           </span>
         </Link>
 

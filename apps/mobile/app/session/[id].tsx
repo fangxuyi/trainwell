@@ -199,7 +199,7 @@ export default function SessionDetailScreen() {
             <Text style={styles.noticeEyebrow}>RECOVERY AVAILABLE</Text>
             <Text style={styles.interruptedTitle}>The recording stopped unexpectedly.</Text>
             <Text style={styles.interruptedText}>
-              Trainwell preserved any audio left on this phone. It may be incomplete and will not
+              Motion Memo preserved any audio left on this phone. It may be incomplete and will not
               upload unless you choose to process it.
             </Text>
             <TouchableOpacity
