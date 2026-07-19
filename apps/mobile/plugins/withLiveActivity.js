@@ -18,11 +18,13 @@ const DEPLOYMENT_TARGET = "16.2";
 // ─── Swift source file contents ────────────────────────────────────────────────
 
 const TRAINWELL_ATTRIBUTES = `import ActivityKit
+import Foundation
 
 struct TrainwellAttributes: ActivityAttributes {
     public struct ContentState: Codable, Hashable {
         var elapsedSeconds: Int
         var isRecording: Bool
+        var timerStartedAt: Date?
     }
     var trainerName: String
     var workoutType: String
@@ -41,59 +43,159 @@ private func formatDuration(_ seconds: Int) -> String {
     return String(format: "%02d:%02d", m, s)
 }
 
+private enum TrainwellPalette {
+    static let background = Color(red: 0.027, green: 0.039, blue: 0.067)
+    static let surface = Color(red: 0.063, green: 0.082, blue: 0.125)
+    static let text = Color(red: 0.961, green: 0.969, blue: 0.980)
+    static let muted = Color(red: 0.612, green: 0.655, blue: 0.722)
+    static let lime = Color(red: 0.780, green: 0.953, blue: 0.420)
+    static let limeDark = Color(red: 0.090, green: 0.208, blue: 0.114)
+    static let warning = Color(red: 0.957, green: 0.780, blue: 0.420)
+}
+
+@available(iOS 16.2, *)
+private struct LiveElapsedText: View {
+    let state: TrainwellAttributes.ContentState
+
+    var body: some View {
+        Group {
+            if state.isRecording, let timerStartedAt = state.timerStartedAt {
+                Text(
+                    timerInterval: timerStartedAt...Date.distantFuture,
+                    countsDown: false,
+                    showsHours: state.elapsedSeconds >= 3600
+                )
+            } else {
+                Text(formatDuration(state.elapsedSeconds))
+            }
+        }
+        .monospacedDigit()
+    }
+}
+
+private func workoutLabel(_ attributes: TrainwellAttributes) -> String {
+    attributes.workoutType.isEmpty ? "Training session" : attributes.workoutType
+}
+
+private func coachLabel(_ attributes: TrainwellAttributes) -> String {
+    attributes.trainerName.isEmpty ? "Self-guided" : "with \\(attributes.trainerName)"
+}
+
 @available(iOS 16.2, *)
 struct TrainwellLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: TrainwellAttributes.self) { context in
-            HStack(spacing: 12) {
-                Image(systemName: "record.circle.fill")
-                    .foregroundColor(.red)
-                    .font(.title2)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(context.attributes.trainerName.isEmpty
-                         ? "Trainwell Recording"
-                         : "Recording with \\(context.attributes.trainerName)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text(formatDuration(context.state.elapsedSeconds))
-                        .font(.title2.monospacedDigit().bold())
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 11) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(context.state.isRecording ? TrainwellPalette.limeDark : Color(red: 0.21, green: 0.18, blue: 0.09))
+                        Image(systemName: context.state.isRecording ? "waveform" : "pause.fill")
+                            .font(.system(size: 15, weight: .black))
+                            .foregroundColor(context.state.isRecording ? TrainwellPalette.lime : TrainwellPalette.warning)
+                    }
+                    .frame(width: 42, height: 42)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("TRAINWELL")
+                            .font(.system(size: 9, weight: .black))
+                            .tracking(1.5)
+                            .foregroundColor(TrainwellPalette.lime)
+                        Text(workoutLabel(context.attributes))
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(TrainwellPalette.text)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(context.state.isRecording ? TrainwellPalette.lime : TrainwellPalette.warning)
+                            .frame(width: 6, height: 6)
+                        Text(context.state.isRecording ? "LIVE" : "PAUSED")
+                            .font(.system(size: 8, weight: .black))
+                            .tracking(0.8)
+                            .foregroundColor(context.state.isRecording ? TrainwellPalette.lime : TrainwellPalette.warning)
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 6)
+                    .background(TrainwellPalette.surface, in: Capsule())
                 }
-                Spacer()
+
+                HStack(alignment: .lastTextBaseline) {
+                    LiveElapsedText(state: context.state)
+                        .font(.system(size: 32, weight: .black, design: .rounded))
+                        .foregroundColor(TrainwellPalette.text)
+                    Spacer()
+                    Text(coachLabel(context.attributes))
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(TrainwellPalette.muted)
+                        .lineLimit(1)
+                }
             }
-            .padding()
-            .activityBackgroundTint(Color(red: 0.07, green: 0.07, blue: 0.1))
-            .activitySystemActionForegroundColor(.white)
+            .padding(.horizontal, 17)
+            .padding(.vertical, 15)
+            .activityBackgroundTint(TrainwellPalette.background)
+            .activitySystemActionForegroundColor(TrainwellPalette.text)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Image(systemName: "record.circle.fill")
-                        .foregroundColor(.red)
-                        .font(.title3)
-                        .padding(.leading, 4)
+                    HStack(spacing: 7) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(TrainwellPalette.limeDark)
+                            Image(systemName: context.state.isRecording ? "waveform" : "pause.fill")
+                                .font(.system(size: 11, weight: .black))
+                                .foregroundColor(context.state.isRecording ? TrainwellPalette.lime : TrainwellPalette.warning)
+                        }
+                        .frame(width: 31, height: 31)
+                        Text("TRAINWELL")
+                            .font(.system(size: 9, weight: .black))
+                            .tracking(1.1)
+                            .foregroundColor(TrainwellPalette.lime)
+                    }
+                    .padding(.leading, 2)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text(formatDuration(context.state.elapsedSeconds))
-                        .font(.callout.monospacedDigit().bold())
-                        .padding(.trailing, 4)
+                    LiveElapsedText(state: context.state)
+                        .font(.system(size: 17, weight: .black, design: .rounded))
+                        .foregroundColor(TrainwellPalette.text)
+                        .padding(.trailing, 2)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    Text(context.attributes.trainerName.isEmpty
-                         ? "Trainwell"
-                         : "with \\(context.attributes.trainerName)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(workoutLabel(context.attributes))
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(TrainwellPalette.text)
+                            Text(coachLabel(context.attributes))
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(TrainwellPalette.muted)
+                        }
+                        Spacer()
+                        Text(context.state.isRecording ? "RECORDING" : "PAUSED")
+                            .font(.system(size: 8, weight: .black))
+                            .tracking(0.8)
+                            .foregroundColor(context.state.isRecording ? TrainwellPalette.lime : TrainwellPalette.warning)
+                    }
+                    .padding(.horizontal, 2)
+                    .padding(.bottom, 3)
                 }
             } compactLeading: {
-                Image(systemName: "record.circle.fill")
-                    .foregroundColor(.red)
-                    .font(.caption)
+                Image(systemName: context.state.isRecording ? "waveform" : "pause.fill")
+                    .foregroundColor(context.state.isRecording ? TrainwellPalette.lime : TrainwellPalette.warning)
+                    .font(.system(size: 11, weight: .black))
             } compactTrailing: {
-                Text(formatDuration(context.state.elapsedSeconds))
-                    .font(.caption2.monospacedDigit().bold())
+                LiveElapsedText(state: context.state)
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundColor(TrainwellPalette.text)
             } minimal: {
-                Image(systemName: "record.circle.fill")
-                    .foregroundColor(.red)
+                Image(systemName: context.state.isRecording ? "waveform" : "pause.fill")
+                    .foregroundColor(context.state.isRecording ? TrainwellPalette.lime : TrainwellPalette.warning)
+                    .font(.system(size: 11, weight: .black))
             }
+            .keylineTint(TrainwellPalette.lime)
         }
     }
 }
@@ -145,11 +247,13 @@ const WIDGET_INFO_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
 
 // TrainwellAttributes duplicated in the main app target so ActivityKit calls compile.
 const LIVE_ACTIVITY_ATTRIBUTES = `import ActivityKit
+import Foundation
 
 struct TrainwellAttributes: ActivityAttributes {
     public struct ContentState: Codable, Hashable {
         var elapsedSeconds: Int
         var isRecording: Bool
+        var timerStartedAt: Date?
     }
     var trainerName: String
     var workoutType: String
@@ -178,7 +282,11 @@ class LiveActivityModule: NSObject {
                 return
             }
             let attrs = TrainwellAttributes(trainerName: trainerName, workoutType: workoutType)
-            let state = TrainwellAttributes.ContentState(elapsedSeconds: 0, isRecording: true)
+            let state = TrainwellAttributes.ContentState(
+                elapsedSeconds: 0,
+                isRecording: true,
+                timerStartedAt: Date()
+            )
             do {
                 let activity = try Activity<TrainwellAttributes>.request(
                     attributes: attrs,
@@ -195,9 +303,10 @@ class LiveActivityModule: NSObject {
         }
     }
 
-    @objc(updateActivity:resolver:rejecter:)
+    @objc(updateActivity:isRecording:resolver:rejecter:)
     func updateActivity(
         _ elapsedSeconds: NSNumber,
+        isRecording: NSNumber,
         resolver resolve: @escaping RCTPromiseResolveBlock,
         rejecter reject: @escaping RCTPromiseRejectBlock
     ) {
@@ -205,7 +314,10 @@ class LiveActivityModule: NSObject {
             guard let activity = currentActivity else { resolve(nil); return }
             let state = TrainwellAttributes.ContentState(
                 elapsedSeconds: elapsedSeconds.intValue,
-                isRecording: true
+                isRecording: isRecording.boolValue,
+                timerStartedAt: isRecording.boolValue
+                    ? Date().addingTimeInterval(-elapsedSeconds.doubleValue)
+                    : nil
             )
             Task { await activity.update(using: state); resolve(nil) }
         } else {
@@ -213,14 +325,19 @@ class LiveActivityModule: NSObject {
         }
     }
 
-    @objc(endActivity:rejecter:)
+    @objc(endActivity:resolver:rejecter:)
     func endActivity(
-        _ resolve: @escaping RCTPromiseResolveBlock,
+        _ elapsedSeconds: NSNumber,
+        resolver resolve: @escaping RCTPromiseResolveBlock,
         rejecter reject: @escaping RCTPromiseRejectBlock
     ) {
         if #available(iOS 16.2, *) {
             guard let activity = currentActivity else { resolve(nil); return }
-            let finalState = TrainwellAttributes.ContentState(elapsedSeconds: 0, isRecording: false)
+            let finalState = TrainwellAttributes.ContentState(
+                elapsedSeconds: elapsedSeconds.intValue,
+                isRecording: false,
+                timerStartedAt: nil
+            )
             Task {
                 await activity.end(using: finalState, dismissalPolicy: .immediate)
                 self.currentActivity = nil
@@ -245,10 +362,12 @@ RCT_EXTERN_METHOD(startActivity:(NSString *)trainerName
                   rejecter:(RCTPromiseRejectBlock)reject)
 
 RCT_EXTERN_METHOD(updateActivity:(nonnull NSNumber *)elapsedSeconds
+                  isRecording:(nonnull NSNumber *)isRecording
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
-RCT_EXTERN_METHOD(endActivity:(RCTPromiseResolveBlock)resolve
+RCT_EXTERN_METHOD(endActivity:(nonnull NSNumber *)elapsedSeconds
+                  resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
 @end
@@ -300,8 +419,14 @@ function withWidgetTarget(config) {
   return withXcodeProject(config, (config) => {
     const xcodeProject = config.modResults;
 
-    // Skip if already added (idempotent)
-    if (xcodeProject.pbxTargetByName(WIDGET_TARGET)) {
+    const existingWidgetTarget = Object.entries(
+      xcodeProject.pbxNativeTargetSection()
+    ).find(
+      ([key, target]) =>
+        !key.endsWith("_comment") &&
+        target?.name?.replaceAll('"', "") === WIDGET_TARGET
+    );
+    if (existingWidgetTarget) {
       return config;
     }
 

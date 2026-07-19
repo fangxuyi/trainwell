@@ -5,8 +5,8 @@ interface LiveActivityModuleType {
     trainerName: string,
     workoutType: string
   ): Promise<string | null>;
-  updateActivity(elapsedSeconds: number): Promise<void>;
-  endActivity(): Promise<void>;
+  updateActivity(elapsedSeconds: number, isRecording: boolean): Promise<void>;
+  endActivity(elapsedSeconds: number): Promise<void>;
 }
 
 const mod: LiveActivityModuleType | null =
@@ -23,17 +23,20 @@ export async function startLiveActivity(
   }
 }
 
-export async function updateLiveActivity(elapsedSeconds: number): Promise<void> {
+export async function updateLiveActivity(
+  elapsedSeconds: number,
+  isRecording: boolean
+): Promise<void> {
   try {
-    await mod?.updateActivity(elapsedSeconds);
+    await mod?.updateActivity(elapsedSeconds, isRecording);
   } catch {
     // Silently ignore — notification fallback is still active
   }
 }
 
-export async function endLiveActivity(): Promise<void> {
+export async function endLiveActivity(elapsedSeconds: number): Promise<void> {
   try {
-    await mod?.endActivity();
+    await mod?.endActivity(elapsedSeconds);
   } catch {
     // Ignore
   }
