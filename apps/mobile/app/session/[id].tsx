@@ -229,6 +229,21 @@ export default function SessionDetailScreen() {
           <ReportSection eyebrow="MOVEMENT BREAKDOWN" title="Exercises">
             {session.exercises.map((exercise, index) => {
               const exerciseKey = exercise.id || String(index);
+              const completedSets = exercise.sets.filter((set) => set.completed);
+              const repValues = completedSets
+                .map((set) => set.completedReps)
+                .filter((value): value is number => value != null);
+              const weightValues = completedSets.flatMap((set) =>
+                set.weight ? [`${set.weight.value} ${set.weight.unit}`] : []
+              );
+              const exerciseDetails = [
+                completedSets.length > 0
+                  ? `${completedSets.length} set${completedSets.length !== 1 ? "s" : ""}`
+                  : null,
+                repValues.length > 0 ? `${repValues.join("/")} reps` : null,
+                weightValues.length > 0 ? [...new Set(weightValues)].join("/") : null,
+              ].filter((detail): detail is string => !!detail);
+              const cue = exercise.techniqueNotes.find((note) => note.text.trim())?.text.trim();
               return (
                 <View key={exerciseKey} style={styles.exerciseRow}>
                   <View style={styles.exerciseHeader}>
@@ -239,18 +254,15 @@ export default function SessionDetailScreen() {
                     </View>
                     <View style={styles.exerciseBody}>
                       <Text style={styles.exerciseName}>{exercise.canonicalName}</Text>
-                      {exercise.sets.length > 0 && (
+                      {exerciseDetails.length > 0 && (
                         <Text style={styles.exerciseDetail}>
-                          {exercise.sets.length} set{exercise.sets.length !== 1 ? "s" : ""}
-                          {exercise.sets[0]?.weight
-                            ? `  ·  ${exercise.sets[0].weight.value} ${exercise.sets[0].weight.unit}`
-                            : ""}
+                          {exerciseDetails.join("  ·  ")}
                         </Text>
                       )}
                     </View>
                   </View>
-                  {exercise.techniqueNotes.length > 0 && (
-                    <Text style={styles.exerciseCue}>{exercise.techniqueNotes[0].text}</Text>
+                  {cue && (
+                    <Text style={styles.exerciseCue}>{cue}</Text>
                   )}
                   {exercise.referenceMedia && (
                     <ExerciseMediaPreview
@@ -267,20 +279,6 @@ export default function SessionDetailScreen() {
                 </View>
               );
             })}
-          </ReportSection>
-        )}
-
-        {session.markdownContent && (
-          <ReportSection eyebrow="GENERATED RECORD" title="Session summary">
-            <Text style={styles.summaryText}>{session.markdownContent}</Text>
-          </ReportSection>
-        )}
-
-        {session.sessionNotes && session.sessionNotes.length > 0 && (
-          <ReportSection eyebrow="FROM THE SESSION" title="Notes">
-            {session.sessionNotes.map((note, index) => (
-              <ListItem key={`${note}-${index}`} text={note} />
-            ))}
           </ReportSection>
         )}
 
@@ -360,6 +358,14 @@ export default function SessionDetailScreen() {
               </TouchableOpacity>
             </View>
           </View>
+        )}
+
+        {session.sessionNotes && session.sessionNotes.length > 0 && (
+          <ReportSection eyebrow="FROM THE SESSION" title="Notes">
+            {session.sessionNotes.map((note, index) => (
+              <ListItem key={`${note}-${index}`} text={note} />
+            ))}
+          </ReportSection>
         )}
 
         <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
@@ -472,7 +478,6 @@ const styles = StyleSheet.create({
   exerciseName: { color: colors.text, fontSize: 14, fontWeight: "800" },
   exerciseDetail: { color: colors.textFaint, fontSize: 10, fontWeight: "700", marginTop: 4 },
   exerciseCue: { color: colors.textMuted, fontSize: 11, lineHeight: 17, borderLeftWidth: 2, borderLeftColor: "rgba(155, 138, 251, 0.55)", paddingLeft: 10, marginTop: 11 },
-  summaryText: { color: colors.textMuted, fontSize: 13, lineHeight: 21 },
   listItem: { flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 10 },
   listDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent, marginTop: 6 },
   listText: { color: colors.textMuted, fontSize: 12, lineHeight: 18, flex: 1 },

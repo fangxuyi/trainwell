@@ -1,12 +1,14 @@
 import type { NeonQueryFunctionInTransaction } from "@neondatabase/serverless";
 import sql from "./db";
 import { chunkExtraction, chunkMarkdown, type SessionChunk } from "./chunks";
+import { generateSummaryText } from "./markdown";
 import type { ExtractionOutput } from "./types";
 import { embedTexts } from "./voyage";
 
 export interface SessionIndexRow extends Record<string, unknown> {
   id: string;
   started_at: string;
+  audio_retention_policy: string;
   remote_status?: string;
 }
 
@@ -131,11 +133,14 @@ export async function finalizeAndIndexSession(
     exercises,
     remote_status: "finalized",
   };
+  const extraction = extractionFromSession(finalized);
+  const summaryText = generateSummaryText(finalized, extraction);
   const chunks = await prepareChunks(finalized);
   const results = await sql.transaction((transaction) => [
     transaction`
       UPDATE sessions
       SET exercises = ${JSON.stringify(exercises)}::jsonb,
+          markdown_content = ${summaryText},
           remote_status = 'finalized',
           remote_version = COALESCE(remote_version, 0) + 1,
           updated_at = now()

@@ -1,4 +1,9 @@
-import type { ExerciseRecord, WorkoutSession } from "@trainwell/schemas";
+import type {
+  ExerciseRecord,
+  ExerciseSet,
+  SourcedNote,
+  WorkoutSession,
+} from "@trainwell/schemas";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
@@ -22,6 +27,66 @@ import { deleteLocalAudio } from "../../src/storage/audioFiles";
 import { runSyncWorker } from "../../src/sync/worker";
 import { ScreenHeader } from "../../src/ui/ScreenHeader";
 import { colors, radii } from "../../src/ui/theme";
+import { uuid } from "../../src/utils/uuid";
+
+function newSourcedNote(text = ""): SourcedNote {
+  return {
+    text,
+    confidence: 1,
+    status: "user_corrected",
+    sourceSegmentIds: [],
+  };
+}
+
+function newExerciseSet(setNumber: number): ExerciseSet {
+  return {
+    setNumber,
+    completed: true,
+    userNotes: [],
+    trainerNotes: [],
+    confidence: 1,
+    sourceSegmentIds: [],
+    weight: undefined,
+  };
+}
+
+function newExercise(sequenceNumber: number): ExerciseRecord {
+  return {
+    id: uuid(),
+    canonicalName: "",
+    spokenNames: [],
+    bodyRegions: [],
+    equipment: [],
+    sequenceNumber,
+    planned: false,
+    completed: true,
+    sets: [newExerciseSet(1)],
+    techniqueNotes: [],
+    userNotes: [],
+    trainerNotes: [],
+    painObservations: [],
+    confidence: 1,
+  };
+}
+
+function cleanedExercises(exercises: ExerciseRecord[]): ExerciseRecord[] {
+  return exercises.map((exercise, exerciseIndex) => ({
+    ...exercise,
+    canonicalName: exercise.canonicalName.trim(),
+    sequenceNumber: exerciseIndex + 1,
+    completed: true,
+    confidence: 1,
+    sets: exercise.sets.map((set, setIndex) => ({
+      ...set,
+      setNumber: setIndex + 1,
+      completed: true,
+      confidence: 1,
+    })),
+    techniqueNotes: exercise.techniqueNotes
+      .map((note) => ({ ...note, text: note.text.trim() }))
+      .filter((note) => note.text.length > 0),
+  }));
+}
 
 export default function ReviewScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -34,7 +99,7 @@ export default function ReviewScreen() {
   useEffect(() => {
     getSessionById(id).then((currentSession) => {
       setSession(currentSession);
-      setExercises(currentSession?.exercises ?? []);
+      setExercises(cleanedExercises(currentSession?.exercises ?? []));
       setLoading(false);
     });
   }, [id]);
@@ -50,7 +115,9 @@ export default function ReviewScreen() {
   const updateExerciseName = (exerciseIndex: number, name: string) => {
     setExercises((previous) =>
       previous.map((exercise, index) =>
-        index === exerciseIndex ? { ...exercise, canonicalName: name } : exercise
+        index === exerciseIndex
+          ? { ...exercise, canonicalName: name, confidence: 1, referenceMedia: undefined }
+          : exercise
       )
     );
   };
@@ -58,7 +125,7 @@ export default function ReviewScreen() {
   const updateSet = (
     exerciseIndex: number,
     setIndex: number,
-    field: "completedReps" | "weightValue",
+    field: "completedReps" | "weightValue" | "weightUnit",
     raw: string
   ) => {
     const value = Number(raw);
@@ -70,10 +137,32 @@ export default function ReviewScreen() {
           sets: exercise.sets.map((set, currentSetIndex) => {
             if (currentSetIndex !== setIndex) return set;
             if (field === "completedReps") {
-              return { ...set, completedReps: raw === "" || Number.isNaN(value) ? undefined : value };
+              return {
+                ...set,
+                completedReps: raw === "" || Number.isNaN(value) ? undefined : value,
+                completed: true,
+                confidence: 1,
+              };
             }
-            if (field === "weightValue" && set.weight && raw !== "" && !Number.isNaN(value)) {
-              return { ...set, weight: { ...set.weight, value } };
+            if (field === "weightUnit") {
+              return set.weight
+                ? { ...set, weight: { ...set.weight, unit: raw, status: "user_corrected" } }
+                : set;
+            }
+            if (field === "weightValue") {
+              if (raw === "" || Number.isNaN(value)) return { ...set, weight: undefined };
+              return {
+                ...set,
+                completed: true,
+                confidence: 1,
+                weight: {
+                  value,
+                  unit: set.weight?.unit ?? "lb",
+                  confidence: 1,
+                  status: "user_corrected",
+                  sourceSegmentIds: set.weight?.sourceSegmentIds ?? [],
+                },
+              };
             }
             return set;
           }),
@@ -82,7 +171,118 @@ export default function ReviewScreen() {
     );
   };
 
+  const addSet = (exerciseIndex: number) => {
+    setExercises((previous) =>
+      previous.map((exercise, index) => {
+        if (index !== exerciseIndex) return exercise;
+        return {
+          ...exercise,
+          sets: [...exercise.sets, newExerciseSet(exercise.sets.length + 1)],
+        };
+      })
+    );
+  };
+
+  const removeSet = (exerciseIndex: number, setIndex: number) => {
+    setExercises((previous) =>
+      previous.map((exercise, index) =>
+        index === exerciseIndex
+          ? {
+              ...exercise,
+              sets: exercise.sets
+                .filter((_, currentSetIndex) => currentSetIndex !== setIndex)
+                .map((set, currentSetIndex) => ({ ...set, setNumber: currentSetIndex + 1 })),
+            }
+          : exercise
+      )
+    );
+  };
+
+  const addExercise = () => {
+    setExercises((previous) => [...previous, newExercise(previous.length + 1)]);
+  };
+
+  const removeExercise = (exerciseIndex: number) => {
+    const exercise = exercises[exerciseIndex];
+    Alert.alert(
+      "Remove exercise?",
+      `Remove ${exercise.canonicalName.trim() || `exercise ${exerciseIndex + 1}`} from this workout?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => {
+            setExercises((previous) =>
+              previous
+                .filter((_, index) => index !== exerciseIndex)
+                .map((item, index) => ({ ...item, sequenceNumber: index + 1 }))
+            );
+          },
+        },
+      ]
+    );
+  };
+
+  const addCue = (exerciseIndex: number) => {
+    setExercises((previous) =>
+      previous.map((exercise, index) =>
+        index === exerciseIndex
+          ? { ...exercise, techniqueNotes: [...exercise.techniqueNotes, newSourcedNote()] }
+          : exercise
+      )
+    );
+  };
+
+  const updateCue = (exerciseIndex: number, cueIndex: number, text: string) => {
+    setExercises((previous) =>
+      previous.map((exercise, index) =>
+        index === exerciseIndex
+          ? {
+              ...exercise,
+              techniqueNotes: exercise.techniqueNotes.map((note, currentCueIndex) =>
+                currentCueIndex === cueIndex ? newSourcedNote(text) : note
+              ),
+            }
+          : exercise
+      )
+    );
+  };
+
+  const removeCue = (exerciseIndex: number, cueIndex: number) => {
+    setExercises((previous) =>
+      previous.map((exercise, index) =>
+        index === exerciseIndex
+          ? {
+              ...exercise,
+              techniqueNotes: exercise.techniqueNotes.filter(
+                (_, currentCueIndex) => currentCueIndex !== cueIndex
+              ),
+            }
+          : exercise
+      )
+    );
+  };
+
   const handleFinalize = () => {
+    const finalizedExercises = cleanedExercises(exercises);
+    if (finalizedExercises.some((exercise) => !exercise.canonicalName)) {
+      Alert.alert("Exercise name required", "Name every exercise or remove the empty exercise.");
+      return;
+    }
+    if (
+      finalizedExercises.some((exercise) =>
+        exercise.sets.some(
+          (set) =>
+            (set.completedReps != null && (!Number.isInteger(set.completedReps) || set.completedReps < 0)) ||
+            (set.weight != null && set.weight.value < 0)
+        )
+      )
+    ) {
+      Alert.alert("Check set values", "Reps must be whole numbers and reps and weight cannot be negative.");
+      return;
+    }
+
     Alert.alert(
       "Finalize Session",
       "Mark this session as reviewed and finalized. Audio files will be deleted if your retention policy is set to delete after review.",
@@ -93,7 +293,7 @@ export default function ReviewScreen() {
           onPress: async () => {
             setSaving(true);
             try {
-              await saveExerciseEdits(id, exercises);
+              await saveExerciseEdits(id, finalizedExercises);
               await enqueueJob(id, "finalize_remote_session");
               await finalizeSession(id);
               if (session?.audioRetentionPolicy === "delete_after_review") {
@@ -146,13 +346,18 @@ export default function ReviewScreen() {
         {exercises.length === 0 ? (
           <View style={styles.emptyCard}>
             <Text style={styles.emptyTitle}>No exercises extracted</Text>
-            <Text style={styles.emptyText}>You can still finalize this session as reviewed.</Text>
+            <Text style={styles.emptyText}>Add the exercises you completed, or finalize an empty workout.</Text>
           </View>
         ) : null}
 
         {exercises.map((exercise, exerciseIndex) => (
           <View key={exercise.id} style={styles.card}>
-            <Text style={styles.cardLabel}>EXERCISE {exerciseIndex + 1}</Text>
+            <View style={styles.cardTopRow}>
+              <Text style={styles.cardLabel}>EXERCISE {exerciseIndex + 1}</Text>
+              <TouchableOpacity onPress={() => removeExercise(exerciseIndex)} hitSlop={8}>
+                <Text style={styles.removeExerciseText}>REMOVE</Text>
+              </TouchableOpacity>
+            </View>
             <TextInput
               style={styles.nameInput}
               value={exercise.canonicalName}
@@ -161,56 +366,109 @@ export default function ReviewScreen() {
               placeholderTextColor={colors.textFaint}
             />
 
-            {exercise.sets.map((set, setIndex) =>
-              set.completed ? (
-                <View key={`${exercise.id}-${set.setNumber}-${setIndex}`} style={styles.setRow}>
-                  <Text style={styles.setLabel}>Set {set.setNumber}</Text>
-                  <View style={styles.setFields}>
-                    <View style={styles.fieldGroup}>
-                      <Text style={styles.fieldLabel}>REPS</Text>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.editorSectionLabel}>SETS · {exercise.sets.length}</Text>
+              <TouchableOpacity onPress={() => addSet(exerciseIndex)} style={styles.inlineAddButton}>
+                <Text style={styles.inlineAddText}>＋ ADD SET</Text>
+              </TouchableOpacity>
+            </View>
+
+            {exercise.sets.length === 0 ? (
+              <Text style={styles.inlineEmptyText}>No sets recorded. Add one if needed.</Text>
+            ) : null}
+
+            {exercise.sets.map((set, setIndex) => (
+              <View key={`${exercise.id}-${setIndex}`} style={styles.setRow}>
+                <View style={styles.setHeaderRow}>
+                  <Text style={styles.setLabel}>Set {setIndex + 1}</Text>
+                  <TouchableOpacity onPress={() => removeSet(exerciseIndex, setIndex)} hitSlop={8}>
+                    <Text style={styles.removeSetText}>Remove set</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.setFields}>
+                  <View style={styles.fieldGroup}>
+                    <Text style={styles.fieldLabel}>REPS</Text>
+                    <TextInput
+                      style={styles.fieldInput}
+                      keyboardType="number-pad"
+                      value={set.completedReps != null ? String(set.completedReps) : ""}
+                      onChangeText={(value) =>
+                        updateSet(exerciseIndex, setIndex, "completedReps", value)
+                      }
+                      placeholder="—"
+                      placeholderTextColor={colors.textFaint}
+                    />
+                  </View>
+                  <View style={styles.fieldGroup}>
+                    <Text style={styles.fieldLabel}>WEIGHT</Text>
+                    <View style={styles.weightFieldRow}>
                       <TextInput
-                        style={styles.fieldInput}
-                        keyboardType="number-pad"
-                        value={set.completedReps != null ? String(set.completedReps) : ""}
+                        style={[styles.fieldInput, styles.weightInput]}
+                        keyboardType="decimal-pad"
+                        value={set.weight?.value != null ? String(set.weight.value) : ""}
                         onChangeText={(value) =>
-                          updateSet(exerciseIndex, setIndex, "completedReps", value)
+                          updateSet(exerciseIndex, setIndex, "weightValue", value)
                         }
                         placeholder="—"
                         placeholderTextColor={colors.textFaint}
                       />
+                      <TouchableOpacity
+                        style={styles.unitButton}
+                        onPress={() =>
+                          updateSet(
+                            exerciseIndex,
+                            setIndex,
+                            "weightUnit",
+                            set.weight?.unit === "kg" ? "lb" : "kg"
+                          )
+                        }
+                      >
+                        <Text style={styles.unitText}>
+                          {(set.weight?.unit ?? "lb").toUpperCase()}
+                        </Text>
+                      </TouchableOpacity>
                     </View>
-                    {set.weight ? (
-                      <View style={styles.fieldGroup}>
-                        <Text style={styles.fieldLabel}>WEIGHT ({set.weight.unit.toUpperCase()})</Text>
-                        <TextInput
-                          style={styles.fieldInput}
-                          keyboardType="decimal-pad"
-                          value={set.weight.value != null ? String(set.weight.value) : ""}
-                          onChangeText={(value) =>
-                            updateSet(exerciseIndex, setIndex, "weightValue", value)
-                          }
-                          placeholder="—"
-                          placeholderTextColor={colors.textFaint}
-                        />
-                      </View>
-                    ) : null}
                   </View>
                 </View>
-              ) : null
-            )}
-
-            {exercise.techniqueNotes.length > 0 ? (
-              <View style={styles.cueBox}>
-                <Text style={styles.cueLabel}>TRAINER CUES</Text>
-                {exercise.techniqueNotes.map((note, index) => (
-                  <Text key={`${note.text}-${index}`} style={styles.cueText}>
-                    • {note.text}
-                  </Text>
-                ))}
               </View>
-            ) : null}
+            ))}
+
+            <View style={styles.cueBox}>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.cueLabel}>TRAINER CUES</Text>
+                <TouchableOpacity onPress={() => addCue(exerciseIndex)} style={styles.inlineAddButton}>
+                  <Text style={styles.inlineAddText}>＋ ADD CUE</Text>
+                </TouchableOpacity>
+              </View>
+              {exercise.techniqueNotes.length === 0 ? (
+                <Text style={styles.inlineEmptyText}>No trainer cues recorded.</Text>
+              ) : null}
+              {exercise.techniqueNotes.map((note, cueIndex) => (
+                <View key={`${exercise.id}-cue-${cueIndex}`} style={styles.cueEditRow}>
+                  <TextInput
+                    style={styles.cueInput}
+                    value={note.text}
+                    onChangeText={(value) => updateCue(exerciseIndex, cueIndex, value)}
+                    placeholder="Add a coaching cue"
+                    placeholderTextColor={colors.textFaint}
+                    multiline
+                  />
+                  <TouchableOpacity onPress={() => removeCue(exerciseIndex, cueIndex)} hitSlop={8}>
+                    <Text style={styles.removeCueText}>×</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
           </View>
         ))}
+
+        <TouchableOpacity style={styles.addExerciseButton} onPress={addExercise}>
+          <Text style={styles.addExerciseIcon}>＋</Text>
+          <View style={styles.addExerciseCopy}>
+            <Text style={styles.addExerciseTitle}>Add exercise</Text>
+            <Text style={styles.addExerciseText}>Include a movement the recap missed.</Text>
+          </View>
+        </TouchableOpacity>
 
         <TouchableOpacity
           style={[styles.finalizeButton, saving && styles.buttonDisabled]}
@@ -250,8 +508,14 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: "900",
     letterSpacing: 1.5,
+  },
+  cardTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: 9,
   },
+  removeExerciseText: { color: colors.danger, fontSize: 9, fontWeight: "900", letterSpacing: 1 },
   nameInput: {
     backgroundColor: colors.surfaceMuted,
     borderWidth: 1,
@@ -264,8 +528,15 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
     marginBottom: 14,
   },
-  setRow: { marginBottom: 12 },
+  sectionHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 9 },
+  editorSectionLabel: { color: colors.textFaint, fontSize: 9, fontWeight: "900", letterSpacing: 1.2 },
+  inlineAddButton: { paddingVertical: 4, paddingLeft: 10 },
+  inlineAddText: { color: colors.accent, fontSize: 9, fontWeight: "900", letterSpacing: 0.8 },
+  inlineEmptyText: { color: colors.textFaint, fontSize: 11, lineHeight: 16, marginBottom: 12 },
+  setRow: { marginBottom: 14, borderRadius: 14, backgroundColor: colors.surfaceMuted, padding: 11 },
+  setHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 7 },
   setLabel: { color: colors.textMuted, fontSize: 12, fontWeight: "700", marginBottom: 6 },
+  removeSetText: { color: colors.textFaint, fontSize: 9, fontWeight: "800" },
   setFields: { flexDirection: "row", gap: 10 },
   fieldGroup: { flex: 1 },
   fieldLabel: { color: colors.textFaint, fontSize: 9, fontWeight: "900", letterSpacing: 1, marginBottom: 5 },
@@ -281,14 +552,20 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     textAlign: "center",
   },
+  weightFieldRow: { flexDirection: "row", gap: 6 },
+  weightInput: { flex: 1 },
+  unitButton: { minWidth: 44, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" },
+  unitText: { color: colors.accent, fontSize: 10, fontWeight: "900" },
   cueBox: {
     marginTop: 4,
     borderTopWidth: 1,
     borderTopColor: colors.border,
     paddingTop: 13,
   },
-  cueLabel: { color: colors.violet, fontSize: 9, fontWeight: "900", letterSpacing: 1.2, marginBottom: 7 },
-  cueText: { color: colors.textMuted, fontSize: 13, lineHeight: 20 },
+  cueLabel: { color: colors.violet, fontSize: 9, fontWeight: "900", letterSpacing: 1.2 },
+  cueEditRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
+  cueInput: { flex: 1, minHeight: 42, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background, color: colors.text, fontSize: 12, lineHeight: 17, paddingHorizontal: 11, paddingVertical: 9 },
+  removeCueText: { color: colors.danger, fontSize: 22, fontWeight: "500", paddingHorizontal: 3 },
   emptyCard: {
     backgroundColor: colors.surface,
     borderWidth: 1,
@@ -299,6 +576,11 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { color: colors.text, fontSize: 17, fontWeight: "900" },
   emptyText: { color: colors.textMuted, fontSize: 13, lineHeight: 19, marginTop: 6 },
+  addExerciseButton: { minHeight: 72, borderRadius: radii.large, borderWidth: 1, borderStyle: "dashed", borderColor: "rgba(199, 243, 107, 0.34)", backgroundColor: "rgba(199, 243, 107, 0.05)", flexDirection: "row", alignItems: "center", paddingHorizontal: 17, marginBottom: 12 },
+  addExerciseIcon: { color: colors.accent, fontSize: 24, marginRight: 12 },
+  addExerciseCopy: { flex: 1 },
+  addExerciseTitle: { color: colors.text, fontSize: 14, fontWeight: "900" },
+  addExerciseText: { color: colors.textFaint, fontSize: 10, marginTop: 3 },
   finalizeButton: {
     minHeight: 58,
     backgroundColor: colors.accent,
