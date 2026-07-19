@@ -1,15 +1,40 @@
 import sql from "./db";
 import { extractWorkoutDataWindowed } from "./extract";
 import { generateSummaryText } from "./markdown";
-import { canonicalizeExtraction } from "./exercise-dataset";
+import { canonicalizeExtraction, preloadExerciseDataset } from "./exercise-dataset";
+
+async function timedStage<T>(
+  sessionId: string,
+  stage: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  const startedAt = Date.now();
+  console.info(`[pipeline] session=${sessionId} stage=${stage} status=started`);
+  try {
+    const result = await operation();
+    console.info(
+      `[pipeline] session=${sessionId} stage=${stage} status=completed duration_ms=${Date.now() - startedAt}`
+    );
+    return result;
+  } catch (error) {
+    console.error(
+      `[pipeline] session=${sessionId} stage=${stage} status=failed duration_ms=${Date.now() - startedAt}`,
+      error
+    );
+    throw error;
+  }
+}
 
 export async function transcribeAndExtract(sessionId: string): Promise<void> {
+  const pipelineStartedAt = Date.now();
+  console.info(`[pipeline] session=${sessionId} status=started`);
+
   // Transcription happens per-chunk at upload time; just fetch existing segments.
-  const transcriptRows = await sql`
-    SELECT * FROM transcript_segments
-    WHERE session_id = ${sessionId}
-    ORDER BY start_seconds ASC
-  `;
+  const transcriptRows = await timedStage(sessionId, "load_transcript", () => sql`
+      SELECT * FROM transcript_segments
+      WHERE session_id = ${sessionId}
+      ORDER BY start_seconds ASC
+    `);
 
   if (transcriptRows.length === 0) {
     // Distinguish the causes so the failure isn't opaque: no audio uploaded at
@@ -38,20 +63,27 @@ export async function transcribeAndExtract(sessionId: string): Promise<void> {
   // Extract workout data with the configured language-model provider. Long
   // sessions are split into time windows and extracted in parallel; short
   // sessions still run as one call.
-  const rawExtraction = await extractWorkoutDataWindowed(
-    sessionId,
-    transcriptRows.map((s) => ({
-      startSeconds: s.start_seconds as number,
-      text: s.text as string,
-    }))
+  preloadExerciseDataset();
+  const rawExtraction = await timedStage(sessionId, "extract_workout", () =>
+    extractWorkoutDataWindowed(
+      sessionId,
+      transcriptRows.map((s) => ({
+        startSeconds: s.start_seconds as number,
+        text: s.text as string,
+      }))
+    )
   );
-  const extraction = await canonicalizeExtraction(rawExtraction).catch((error) => {
+  const extraction = await timedStage(sessionId, "canonicalize_exercises", () =>
+    canonicalizeExtraction(rawExtraction)
+  ).catch((error) => {
     console.warn(`Exercise canonicalization skipped for session ${sessionId}:`, error);
     return rawExtraction;
   });
 
   // Generate compact summary in workout-summary skill format
-  const sessionRows = await sql`SELECT * FROM sessions WHERE id = ${sessionId}`;
+  const sessionRows = await timedStage(sessionId, "load_session", () =>
+    sql`SELECT * FROM sessions WHERE id = ${sessionId}`
+  );
   if (sessionRows.length === 0) throw new Error(`Session ${sessionId} not found`);
   const session = sessionRows[0] as {
     id: string;
@@ -64,26 +96,31 @@ export async function transcribeAndExtract(sessionId: string): Promise<void> {
     goals?: string[];
     audio_retention_policy: string;
   };
-  const summaryText = generateSummaryText(session, extraction);
+  const summaryText = await timedStage(sessionId, "generate_summary", async () =>
+    generateSummaryText(session, extraction)
+  );
 
   // Persist extraction results
-  await sql`
-    UPDATE sessions SET
-      exercises = ${JSON.stringify(extraction.exercises)}::jsonb,
-      session_notes = ${JSON.stringify(extraction.sessionNotes)},
-      technique_themes = ${JSON.stringify(extraction.techniqueThemes)},
-      accomplishments = ${JSON.stringify(extraction.accomplishments)},
-      improvement_areas = ${JSON.stringify(extraction.improvementAreas)},
-      pain_observations = ${JSON.stringify(extraction.painObservations)},
-      next_session_plan = ${JSON.stringify(extraction.nextSessionPlan ?? null)},
-      overall_difficulty = ${extraction.overallDifficulty?.value ?? null},
-      energy_level = ${extraction.energyLevel?.value ?? null},
-      markdown_content = ${summaryText},
-      extraction_version = ${extraction.extractionVersion},
-      remote_status = 'review_required',
-      remote_version = remote_version + 1,
-      updated_at = now()
-    WHERE id = ${sessionId}
-  `;
+  await timedStage(sessionId, "persist_recap", () => sql`
+      UPDATE sessions SET
+        exercises = ${JSON.stringify(extraction.exercises)}::jsonb,
+        session_notes = ${JSON.stringify(extraction.sessionNotes)},
+        technique_themes = ${JSON.stringify(extraction.techniqueThemes)},
+        accomplishments = ${JSON.stringify(extraction.accomplishments)},
+        improvement_areas = ${JSON.stringify(extraction.improvementAreas)},
+        pain_observations = ${JSON.stringify(extraction.painObservations)},
+        next_session_plan = ${JSON.stringify(extraction.nextSessionPlan ?? null)},
+        overall_difficulty = ${extraction.overallDifficulty?.value ?? null},
+        energy_level = ${extraction.energyLevel?.value ?? null},
+        markdown_content = ${summaryText},
+        extraction_version = ${extraction.extractionVersion},
+        remote_status = 'review_required',
+        remote_version = remote_version + 1,
+        updated_at = now()
+      WHERE id = ${sessionId}
+    `);
 
+  console.info(
+    `[pipeline] session=${sessionId} status=completed duration_ms=${Date.now() - pipelineStartedAt}`
+  );
 }

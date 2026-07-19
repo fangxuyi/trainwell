@@ -3,6 +3,7 @@ import type {
   ExerciseReferenceMedia,
   ExtractionOutput,
 } from "@/lib/types";
+import { unstable_cache } from "next/cache";
 
 interface DatasetExercise {
   id?: string;
@@ -26,6 +27,7 @@ const CACHE_TTL_MS = 60 * 60 * 1000;
 
 let cachedDataset: DatasetExercise[] | null = null;
 let cachedAt = 0;
+let datasetRequest: Promise<DatasetExercise[]> | null = null;
 
 const ZH_ALIASES: Record<string, string> = {
   哑铃: "dumbbell",
@@ -114,22 +116,63 @@ function scoreCandidate(candidate: ExerciseRecord, datasetExercise: DatasetExerc
   return Math.min(score, 1);
 }
 
+function compactDatasetEntry(entry: DatasetExercise): DatasetExercise {
+  return {
+    id: entry.id,
+    name: entry.name,
+    equipment: entry.equipment,
+    target: entry.target,
+    body_part: entry.body_part,
+    category: entry.category,
+    muscle_group: entry.muscle_group,
+    secondary_muscles: entry.secondary_muscles,
+    image: entry.image,
+    gif_url: entry.gif_url,
+    attribution: entry.attribution,
+  };
+}
+
+const loadCachedDataset = unstable_cache(
+  async (): Promise<DatasetExercise[]> => {
+    const response = await fetch(DATASET_URL, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`Exercise dataset request failed (${response.status})`);
+    }
+
+    const data = (await response.json()) as unknown;
+    if (!Array.isArray(data)) throw new Error("Exercise dataset must be an array");
+
+    return data
+      .filter((entry): entry is DatasetExercise =>
+        !!entry && typeof entry === "object" && typeof (entry as DatasetExercise).name === "string"
+      )
+      .map(compactDatasetEntry);
+  },
+  ["exercise-dataset", DATASET_URL],
+  { revalidate: 3600 }
+);
+
 async function getDataset(): Promise<DatasetExercise[]> {
   if (cachedDataset && Date.now() - cachedAt < CACHE_TTL_MS) return cachedDataset;
+  if (datasetRequest) return datasetRequest;
 
-  const response = await fetch(DATASET_URL, { next: { revalidate: 3600 } });
-  if (!response.ok) {
-    throw new Error(`Exercise dataset request failed (${response.status})`);
+  datasetRequest = (async () => {
+    cachedDataset = await loadCachedDataset();
+    cachedAt = Date.now();
+    return cachedDataset;
+  })();
+
+  try {
+    return await datasetRequest;
+  } finally {
+    datasetRequest = null;
   }
+}
 
-  const data = (await response.json()) as unknown;
-  if (!Array.isArray(data)) throw new Error("Exercise dataset must be an array");
-
-  cachedDataset = data.filter((entry): entry is DatasetExercise =>
-    !!entry && typeof entry === "object" && typeof (entry as DatasetExercise).name === "string"
-  );
-  cachedAt = Date.now();
-  return cachedDataset;
+export function preloadExerciseDataset(): void {
+  void getDataset().catch((error) => {
+    console.warn("Exercise dataset preload failed:", error);
+  });
 }
 
 function resolveMediaUrl(path: string | undefined): string | undefined {
