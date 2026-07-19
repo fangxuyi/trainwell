@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
@@ -46,6 +47,7 @@ export default function AskScreen() {
     };
     setMessages((previous) => [...previous, userMessage]);
     setInput("");
+    Keyboard.dismiss();
     setLoading(true);
 
     try {
