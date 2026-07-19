@@ -8,6 +8,50 @@ interface Message {
   content: string;
 }
 
+function InlineMarkdown({ text }: { text: string }) {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, index) =>
+    part.startsWith("**") && part.endsWith("**") ? (
+      <strong key={index} className="font-extrabold text-[#F5F7FA]">
+        {part.slice(2, -2)}
+      </strong>
+    ) : (
+      <span key={index}>{part}</span>
+    )
+  );
+}
+
+function AssistantMessage({ content }: { content: string }) {
+  return (
+    <div className="space-y-2">
+      {content.split("\n").map((rawLine, index) => {
+        const line = rawLine.trim();
+        if (!line) return <div key={index} className="h-1" />;
+
+        const heading = line.match(/^#{1,3}\s+(.+)$/);
+        if (heading) {
+          return (
+            <p key={index} className="pt-1 font-extrabold text-[#F5F7FA]">
+              <InlineMarkdown text={heading[1]} />
+            </p>
+          );
+        }
+
+        const bullet = line.match(/^[-*]\s+(.+)$/);
+        if (bullet) {
+          return (
+            <div key={index} className="flex gap-2">
+              <span aria-hidden className="mt-[0.05rem] text-[#9B8AFB]">•</span>
+              <p className="min-w-0"><InlineMarkdown text={bullet[1]} /></p>
+            </div>
+          );
+        }
+
+        return <p key={index}><InlineMarkdown text={line} /></p>;
+      })}
+    </div>
+  );
+}
+
 const SUGGESTIONS = [
   "What exercises did I do last session?",
   "How has my squat progressed?",
@@ -132,7 +176,9 @@ function AskAIContent() {
                     ? "rounded-br-sm bg-[#C7F36B] font-medium text-[#101707]"
                     : "rounded-bl-sm border border-white/[0.07] bg-[#202736] text-[#D9DEE7]"
                 }`}>
-                  {message.content}
+                  {message.role === "assistant"
+                    ? <AssistantMessage content={message.content} />
+                    : message.content}
                 </div>
               </div>
             ))}

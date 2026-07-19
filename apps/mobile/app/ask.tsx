@@ -195,10 +195,54 @@ function MessageBubble({ message }: { message: Message }) {
         {fromUser ? "YOU" : "TRAINWELL"}
       </Text>
       <View style={[styles.bubble, fromUser ? styles.userBubble : styles.aiBubble]}>
-        <Text style={[styles.messageText, fromUser && styles.userMessageText]}>
-          {message.text}
-        </Text>
+        {fromUser ? (
+          <Text style={[styles.messageText, styles.userMessageText]}>{message.text}</Text>
+        ) : (
+          <AssistantMessage content={message.text} />
+        )}
       </View>
+    </View>
+  );
+}
+
+function InlineMarkdown({ text }: { text: string }) {
+  return (
+    <Text style={styles.messageText}>
+      {text.split(/(\*\*[^*]+\*\*)/g).map((part, index) =>
+        part.startsWith("**") && part.endsWith("**") ? (
+          <Text key={index} style={styles.messageStrong}>{part.slice(2, -2)}</Text>
+        ) : (
+          <Text key={index}>{part}</Text>
+        )
+      )}
+    </Text>
+  );
+}
+
+function AssistantMessage({ content }: { content: string }) {
+  return (
+    <View style={styles.formattedMessage}>
+      {content.split("\n").map((rawLine, index) => {
+        const line = rawLine.trim();
+        if (!line) return <View key={index} style={styles.messageSpacer} />;
+
+        const heading = line.match(/^#{1,3}\s+(.+)$/);
+        if (heading) {
+          return <Text key={index} style={styles.messageHeading}>{heading[1].replace(/\*\*/g, "")}</Text>;
+        }
+
+        const bullet = line.match(/^[-*]\s+(.+)$/);
+        if (bullet) {
+          return (
+            <View key={index} style={styles.messageBulletRow}>
+              <Text style={styles.messageBullet}>•</Text>
+              <View style={styles.messageBulletContent}><InlineMarkdown text={bullet[1]} /></View>
+            </View>
+          );
+        }
+
+        return <InlineMarkdown key={index} text={line} />;
+      })}
     </View>
   );
 }
@@ -255,6 +299,13 @@ const styles = StyleSheet.create({
   aiBubble: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderTopLeftRadius: 6 },
   userBubble: { backgroundColor: colors.accent, borderBottomRightRadius: 6 },
   messageText: { color: colors.text, fontSize: 14, lineHeight: 21 },
+  formattedMessage: { gap: 7 },
+  messageStrong: { fontWeight: "800", color: "#F5F7FA" },
+  messageHeading: { color: colors.text, fontSize: 15, lineHeight: 21, fontWeight: "900", marginTop: 2 },
+  messageSpacer: { height: 3 },
+  messageBulletRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  messageBullet: { color: colors.violet, fontSize: 15, lineHeight: 21 },
+  messageBulletContent: { flex: 1 },
   userMessageText: { color: colors.accentText, fontWeight: "600" },
   thinkingCard: { flexDirection: "row", alignItems: "center", gap: 9, marginBottom: 8 },
   aiMark: { width: 28, height: 28, borderRadius: 10, backgroundColor: colors.violetDark, alignItems: "center", justifyContent: "center" },

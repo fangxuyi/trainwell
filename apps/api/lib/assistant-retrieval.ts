@@ -112,7 +112,7 @@ async function getFinalizedSessions(
 }
 
 function sessionContext(session: SessionIndexRow): string {
-  const header = `FINALIZED SESSION ${session.id} — ${formatDate(session.started_at)}`;
+  const header = `FINALIZED SESSION — ${formatDate(session.started_at)}`;
   const chunks = chunksFromSession(session).map((chunk) => chunk.content);
   return `${header}\n${chunks.join("\n\n")}`;
 }
@@ -177,7 +177,7 @@ function exerciseHistoryContext(sessions: SessionIndexRow[], question: string): 
           volumes.set(unit, (volumes.get(unit) ?? 0) + set.weight.value * (set.completedReps ?? 0));
         }
       }
-      return `- ${formatDate(session.started_at)} [session ${session.id}]: ${sets.map(formatSet).join("; ") || "no completed sets"}`;
+      return `- ${formatDate(session.started_at)}: ${sets.map(formatSet).join("; ") || "no completed sets"}`;
     });
 
     const stats = [
@@ -212,7 +212,7 @@ function historyContext(sessions: SessionIndexRow[]): string {
     const exercises = parseArray<ExerciseRecord>(session.exercises)
       .filter((exercise) => exercise.completed)
       .map((exercise) => exercise.canonicalName);
-    return `- ${formatDate(session.started_at)} [session ${session.id}]: ${session.workout_type ?? "Workout"}; exercises: ${exercises.join(", ") || "none recorded"}`;
+    return `- ${formatDate(session.started_at)}: ${session.workout_type ?? "Workout"}; exercises: ${exercises.join(", ") || "none recorded"}`;
   });
   return `STRUCTURED FINALIZED SESSION HISTORY\nMatching sessions: ${sessions.length}\n${entries.join("\n")}`;
 }
@@ -276,7 +276,7 @@ async function hybridChunks(userId: string, question: string): Promise<Retrieved
 function chunkContext(chunks: RetrievedChunk[]): string {
   return chunks.map((chunk) => {
     const label = `${formatDate(chunk.started_at)} — ${chunk.workout_type ?? "Workout"}${chunk.trainer_name ? ` with ${chunk.trainer_name}` : ""}`;
-    return `[${label}; session ${chunk.session_id}]\n${chunk.content}`;
+    return `[${label}]\n${chunk.content}`;
   }).join("\n\n---\n\n");
 }
 
