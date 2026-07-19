@@ -70,6 +70,10 @@ async function runSyncWorkerInternal(sessionId: string): Promise<void> {
       for (const job of finalizationJobs) {
         await runJob(job, () => handleFinalizeRemoteSession(job));
       }
+      const remote = await apiGet<Record<string, unknown>>(
+        `/api/workouts/${sessionId}`
+      );
+      await saveSyncResult(sessionId, remote);
       await updateSessionStatus(sessionId, {
         localStatus: "cached",
         remoteStatus: "finalized",

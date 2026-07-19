@@ -36,7 +36,7 @@ The iPhone app is the primary experience. A companion web portal lets you revisi
 ### Review and learn over time
 
 - Recent sessions and full workout history on mobile.
-- Editable extracted exercise names, reps, and weights before finalization.
+- Full workout review before finalization: rename, add, or remove exercises; add or remove sets; edit reps and weights; and add, edit, or remove trainer cues.
 - Body measurement tracking for waist, chest, hips, limbs, and custom areas, with centimeter or inch units, dated history, and changes from the prior entry.
 - Ask AI across prior sessions using only the signed-in user’s workout history.
 - Authenticated web portal for viewing session details and asking workout-history questions.

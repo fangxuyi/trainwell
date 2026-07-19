@@ -12,6 +12,7 @@ export default function ExerciseList({ exercises }: { exercises: ExerciseRecord[
       {exercises.map((exercise, index) => {
         const completedSets = exercise.sets.filter((set) => set.completed);
         const firstWeight = completedSets.find((set) => set.weight)?.weight;
+        const cue = exercise.techniqueNotes.find((note) => note.text.trim())?.text.trim();
         const exerciseKey = exercise.id || String(index);
         const isPreviewing = activeExerciseId === exerciseKey;
 
@@ -38,9 +39,9 @@ export default function ExerciseList({ exercises }: { exercises: ExerciseRecord[
                     )}
                   </div>
                 </div>
-                {exercise.techniqueNotes.length > 0 && (
+                {cue && (
                   <p className="mt-2 border-l-2 border-[#9B8AFB]/50 pl-3 text-xs leading-5 text-[#9CA7B8]">
-                    {exercise.techniqueNotes[0].text}
+                    {cue}
                   </p>
                 )}
                 {exercise.referenceMedia && (
