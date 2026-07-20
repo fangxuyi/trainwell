@@ -29,6 +29,22 @@ Representative Build Week pull requests include [hybrid finalized-record retriev
 
 Codex served as an engineering partner across product planning, repository analysis, implementation, debugging, validation, and delivery. It helped trace the local-first recording and synchronization flows, propose implementation plans, update the mobile app and server APIs together, keep shared schemas aligned, and deliver focused pull requests. Important decisions made through this collaboration included preserving on-device state before network work, uploading recordings through presigned Blob URLs, indexing only finalized user-reviewed records, and using the existing Neon Postgres and pgvector stack for hybrid retrieval rather than introducing another search service.
 
+### Development acceleration with Codex
+
+Repository and GitHub history show a clear increase in delivery after Codex joined the project on July 15. Comparing equal five-day periods:
+
+| Metric | July 10–14 | July 15–19 |
+|---|---:|---:|
+| Merged pull requests | 3 | 33 |
+| Pull requests per day | 0.6 | 6.6 |
+| Additions reported by pull requests | 5,713 | 10,820 |
+| Deletions reported by pull requests | 917 | 2,906 |
+| Files changed in the resulting codebase | 23 | 108 |
+
+This was an **11× increase in merged pull-request throughput** and a **4.7× increase in the number of files changed**. Of the 33 pull requests merged from July 15 through July 19, 26 were delivered from `codex/*` branches. Those changes covered the mobile app, server APIs, retrieval pipeline, recording reliability, billing, documentation, and product design.
+
+For broader context, 22 pull requests were merged during the 29 days from June 16 through July 14, compared with 33 during the five days beginning July 15. These figures come from merged GitHub pull-request metadata and Git history at the end of July 19. Additions and deletions measure development activity rather than product quality and may count a line more than once when a later pull request revises it; the dated pull requests and delivered features provide the primary evidence of acceleration.
+
 ### How GPT-5.6 is used
 
 The Build Week deployment uses the OpenAI provider implemented in `apps/api/lib/language-model.ts`, which defaults to `gpt-5.6-terra`. GPT-5.6 converts workout transcripts into structured exercise and coaching data, answers questions over retrieved finalized workout records, and rewrites contextual follow-up questions into standalone retrieval queries. Retrieval remains deterministic and grounded: authenticated SQL and pgvector select only the signed-in user’s finalized records, then GPT-5.6 generates an answer from that supplied context. Model output is treated as untrusted and reviewed workout corrections remain authoritative.
