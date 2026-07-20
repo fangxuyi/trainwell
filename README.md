@@ -4,6 +4,12 @@ Motion Memo turns a recorded personal-training session into a useful workout his
 
 The iPhone app is the primary experience. A companion web portal lets you revisit sessions, ask questions about your history, and manage credits from a browser.
 
+## Demo
+
+[![Watch the Motion Memo demo](https://img.youtube.com/vi/ud5qsS-gcAE/maxresdefault.jpg)](https://youtu.be/ud5qsS-gcAE)
+
+[Watch the Motion Memo demo on YouTube](https://youtu.be/ud5qsS-gcAE). The demo covers recording a workout, reviewing and finalizing the generated recap, exploring workout history, asking follow-up questions with Ask AI, and using the companion web portal.
+
 ## OpenAI Build Week
 
 Motion Memo existed before OpenAI Build Week as an early mobile and web workout-recording product. Before the submission period, the repository already included continuous recording, Clerk authentication, user-scoped API routes, retryable Vercel Blob uploads, transcription, and an initial windowed workout-extraction pipeline.
@@ -126,3 +132,9 @@ cd apps/mobile && npx tsc --noEmit
 ```
 
 The deployed portal is available at [api-ebon-mu-79.vercel.app](https://api-ebon-mu-79.vercel.app/). Judge credentials, when needed, should be supplied privately through the Devpost testing instructions rather than committed to this public repository.
+
+## Related project
+
+The workout-summarization workflow is also available as a standalone [Strength Training Recording Summary skill on ClawHub](https://clawhub.ai/fangxuyi/skills/strength-training-recording-summary).
+
+The skill offers a portable version of the recording-to-summary workflow. Motion Memo expands the concept into a complete mobile and web experience with workout recording, review and finalization, historical progress tracking, hybrid retrieval, and multi-round Ask AI. Motion Memo does not depend on the ClawHub skill to run.
