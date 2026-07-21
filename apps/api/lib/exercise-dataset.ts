@@ -207,6 +207,9 @@ export async function attachExerciseDatasetCandidates(
   return {
     ...distilled,
     exercises: distilled.exercises.map((exercise) => {
+      if (exercise.status === "mentioned_only") {
+        return { ...exercise, datasetCandidates: [] };
+      }
       const ranked = dataset
         .map((entry) => rankDistilledCandidate(exercise, entry))
         .filter((candidate): candidate is ExerciseDatasetCandidate => !!candidate)
