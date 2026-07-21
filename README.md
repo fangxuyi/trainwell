@@ -47,7 +47,7 @@ For broader context, 22 pull requests were merged during the 29 days from June 1
 
 ### How GPT-5.6 is used
 
-The Build Week deployment uses the OpenAI provider implemented in `apps/api/lib/language-model.ts`, which defaults to `gpt-5.6-terra`. GPT-5.6 converts workout transcripts into structured exercise and coaching data, answers questions over retrieved finalized workout records, and rewrites contextual follow-up questions into standalone retrieval queries. Retrieval remains deterministic and grounded: authenticated SQL and pgvector select only the signed-in user’s finalized records, then GPT-5.6 generates an answer from that supplied context. Model output is treated as untrusted and reviewed workout corrections remain authoritative.
+The Build Week deployment uses the OpenAI provider implemented in `apps/api/lib/language-model.ts`, which defaults to `gpt-5.6-terra`. GPT-5.6 first isolates exercise evidence into a compact timeline, then synthesizes that reduced transcript into structured exercise and coaching data. It also answers questions over retrieved finalized workout records and rewrites contextual follow-up questions into standalone retrieval queries. Retrieval remains deterministic and grounded: authenticated SQL and pgvector select only the signed-in user’s finalized records, then GPT-5.6 generates an answer from that supplied context. Model output is treated as untrusted and reviewed workout corrections remain authoritative.
 
 ## From workout to workout history
 

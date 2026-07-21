@@ -1,7 +1,11 @@
 import sql from "./db";
-import { extractWorkoutDataWindowed } from "./extract";
+import { synthesizeWorkoutData } from "./extract";
 import { generateSummaryText } from "./markdown";
 import { canonicalizeExtraction, preloadExerciseDataset } from "./exercise-dataset";
+import {
+  distillWorkoutTranscriptWindowed,
+  formatDistilledWorkoutTranscript,
+} from "./transcript-distillation";
 
 async function timedStage<T>(
   sessionId: string,
@@ -60,18 +64,22 @@ export async function transcribeAndExtract(sessionId: string): Promise<void> {
     );
   }
 
-  // Extract workout data with the configured language-model provider. Long
-  // sessions are split into time windows and extracted in parallel; short
-  // sessions still run as one call.
+  // First isolate transcript-supported exercise evidence into a compact,
+  // window-safe timeline. Then synthesize one coherent workout record from
+  // that reduced transcript so session-level conclusions see the whole workout.
   preloadExerciseDataset();
-  const rawExtraction = await timedStage(sessionId, "extract_workout", () =>
-    extractWorkoutDataWindowed(
+  const distilled = await timedStage(sessionId, "distill_transcript", () =>
+    distillWorkoutTranscriptWindowed(
       sessionId,
       transcriptRows.map((s) => ({
         startSeconds: s.start_seconds as number,
         text: s.text as string,
       }))
     )
+  );
+  const distilledTranscript = formatDistilledWorkoutTranscript(distilled);
+  const rawExtraction = await timedStage(sessionId, "synthesize_workout", () =>
+    synthesizeWorkoutData(sessionId, distilledTranscript)
   );
   const extraction = await timedStage(sessionId, "canonicalize_exercises", () =>
     canonicalizeExtraction(rawExtraction)
