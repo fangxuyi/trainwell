@@ -14,7 +14,12 @@ const SYNTHESIS_SYSTEM_PROMPT = `You are the synthesis stage of a workout proces
 
 Rules:
 - Use only information in the distilled workout transcript
-- Distinguish between COMPLETED exercises and PLANNED/FUTURE exercises
+- Preserve the exercise context classification from distillation. Dataset candidates must never change whether an exercise was performed, instructed, planned, merely mentioned, or unclear.
+- Include an exercise as completed only when status=performed. Set completed=true and planned=false for supported performed work.
+- For status=active_instruction, do not claim completion. Preserve it only as non-completed current-session context when useful.
+- Put status=planned_future evidence only in nextSessionPlan; never count it as completed work.
+- Completely exclude status=mentioned_only exercises from exercises, session themes, accomplishments, improvement areas, and nextSessionPlan.
+- Never mark status=unclear as completed. Add a concise open question only when user review could resolve meaningful workout data.
 - "Next time try X" or "try X next session" means a next-session recommendation, NOT a completed set
 - If a value is uncertain, preserve that uncertainty with a low confidence score and status "weakly_inferred"
 - If a value is explicitly preserved in the evidence timeline, use confidence 0.9+ and status "explicit"
