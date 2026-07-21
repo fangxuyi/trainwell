@@ -1,6 +1,6 @@
 import { generateText } from "@/lib/language-model";
 
-const DISTILLATION_VERSION = "1.0";
+const DISTILLATION_VERSION = "1.1-candidate-ready";
 const DISTILLATION_WINDOW_SECONDS = 900;
 const DISTILLATION_CONTEXT_SECONDS = 90;
 
@@ -21,10 +21,26 @@ type DistilledSet = {
   evidence: string[];
 };
 
-type DistilledExercise = {
+export type ExerciseDatasetCandidate = {
+  datasetId?: string;
+  name: string;
+  equipment?: string;
+  target?: string;
+  bodyPart?: string;
+  category?: string;
+  muscleGroup?: string;
+  score: number;
+  recommended: boolean;
+  reasons: string[];
+};
+
+export type DistilledExercise = {
   evidenceId: string;
   name: string;
   spokenNames: string[];
+  movementDescription?: string;
+  bodyRegions: string[];
+  category?: string;
   startedAtSeconds?: number;
   endedAtSeconds?: number;
   status: "completed" | "planned" | "unclear";
@@ -35,6 +51,7 @@ type DistilledExercise = {
   painObservations: string[];
   progressionSuggestions: string[];
   confidence: number;
+  datasetCandidates: ExerciseDatasetCandidate[];
 };
 
 type DistilledSessionSignal = {
@@ -61,7 +78,9 @@ const DISTILLATION_SYSTEM_PROMPT = `You are the evidence-distillation stage of a
 
 Rules:
 - Extract facts and transcript-supported observations only. Do not write a workout recap or infer overall themes.
-- Identify each exercise, its approximate start and end time, completion status, sets, reps, weight, duration, equipment, personalized coaching cues, user observations, pain, and progression suggestions when supported.
+- Identify each exercise, its neutral movement description, body regions, approximate start and end time, completion status, sets, reps, weight, duration, equipment, personalized coaching cues, user observations, pain, and progression suggestions when supported.
+- Describe the movement mechanics concisely when they are stated or directly observable from the conversation. Do not fill in generic textbook instructions.
+- Include body regions and category only when the transcript supports them. Do not infer them solely from general knowledge of an exercise name.
 - Keep cues specific to this session. Omit generic instructions and unrelated conversation.
 - Distinguish completed work from plans or next-session suggestions.
 - Preserve trainer-spoken exercise names. Use a conventional exercise name only when identifiable; otherwise use the clearest transcript wording.
@@ -76,6 +95,9 @@ const DISTILLATION_SCHEMA = `{
       "evidenceId": "short stable label",
       "name": "exercise name",
       "spokenNames": ["trainer wording"],
+      "movementDescription": "neutral transcript-supported movement description",
+      "bodyRegions": ["body region mentioned or clearly described"],
+      "category": "strength | mobility | balance | cardio | recovery | other | null",
       "startedAtSeconds": 0,
       "endedAtSeconds": 120,
       "status": "completed | planned | unclear",
@@ -177,6 +199,9 @@ function normalizeExercise(
       optionalString(value.evidenceId) ?? `window-${windowIndex + 1}-exercise-${exerciseIndex + 1}`,
     name,
     spokenNames: stringArray(value.spokenNames),
+    movementDescription: optionalString(value.movementDescription),
+    bodyRegions: stringArray(value.bodyRegions),
+    category: optionalString(value.category),
     startedAtSeconds: optionalNumber(value.startedAtSeconds),
     endedAtSeconds: optionalNumber(value.endedAtSeconds),
     status: normalizeStatus(value.status),
@@ -187,6 +212,7 @@ function normalizeExercise(
     painObservations: stringArray(value.painObservations),
     progressionSuggestions: stringArray(value.progressionSuggestions),
     confidence: Math.min(1, Math.max(0, optionalNumber(value.confidence) ?? 0.5)),
+    datasetCandidates: [],
   };
 }
 
@@ -368,8 +394,38 @@ export function formatDistilledWorkoutTranscript(
     if (exercise.spokenNames.length > 0) {
       lines.push(`Spoken names: ${exercise.spokenNames.join("; ")}`);
     }
+    if (exercise.movementDescription) {
+      lines.push(`Movement description: ${exercise.movementDescription}`);
+    }
+    if (exercise.bodyRegions.length > 0) {
+      lines.push(`Body regions: ${exercise.bodyRegions.join("; ")}`);
+    }
+    if (exercise.category) lines.push(`Category: ${exercise.category}`);
     if (exercise.equipment.length > 0) {
       lines.push(`Equipment: ${exercise.equipment.join("; ")}`);
+    }
+    if (exercise.datasetCandidates.length > 0) {
+      lines.push("Dataset candidates (retrieval hints, not transcript evidence):");
+      exercise.datasetCandidates.forEach((candidate, candidateIndex) => {
+        const metadata = [
+          candidate.equipment ? `equipment=${candidate.equipment}` : null,
+          candidate.target ? `target=${candidate.target}` : null,
+          candidate.bodyPart ? `body=${candidate.bodyPart}` : null,
+          candidate.category ? `category=${candidate.category}` : null,
+          candidate.muscleGroup ? `muscle=${candidate.muscleGroup}` : null,
+        ].filter((item): item is string => !!item);
+        lines.push(
+          `- Candidate ${candidateIndex + 1}: ${candidate.name} ` +
+            `(datasetId=${candidate.datasetId ?? "unknown"}, score=${candidate.score.toFixed(3)}, ` +
+            `recommended=${candidate.recommended})`
+        );
+        if (metadata.length > 0) lines.push(`  Metadata: ${metadata.join(", ")}`);
+        if (candidate.reasons.length > 0) {
+          lines.push(`  Match reasons: ${candidate.reasons.join("; ")}`);
+        }
+      });
+    } else {
+      lines.push("Dataset candidates: none sufficiently relevant");
     }
     exercise.sets.forEach((set) => {
       const details = [

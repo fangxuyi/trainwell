@@ -1,7 +1,11 @@
 import sql from "./db";
 import { synthesizeWorkoutData } from "./extract";
 import { generateSummaryText } from "./markdown";
-import { canonicalizeExtraction, preloadExerciseDataset } from "./exercise-dataset";
+import {
+  attachExerciseDatasetCandidates,
+  canonicalizeExtraction,
+  preloadExerciseDataset,
+} from "./exercise-dataset";
 import {
   distillWorkoutTranscriptWindowed,
   formatDistilledWorkoutTranscript,
@@ -77,12 +81,20 @@ export async function transcribeAndExtract(sessionId: string): Promise<void> {
       }))
     )
   );
-  const distilledTranscript = formatDistilledWorkoutTranscript(distilled);
+  const groundedDistillation = await timedStage(
+    sessionId,
+    "retrieve_exercise_candidates",
+    () => attachExerciseDatasetCandidates(distilled)
+  ).catch((error) => {
+    console.warn(`Exercise candidate retrieval skipped for session ${sessionId}:`, error);
+    return distilled;
+  });
+  const distilledTranscript = formatDistilledWorkoutTranscript(groundedDistillation);
   const rawExtraction = await timedStage(sessionId, "synthesize_workout", () =>
     synthesizeWorkoutData(sessionId, distilledTranscript)
   );
   const extraction = await timedStage(sessionId, "canonicalize_exercises", () =>
-    canonicalizeExtraction(rawExtraction)
+    canonicalizeExtraction(rawExtraction, { allowFuzzyMatch: false })
   ).catch((error) => {
     console.warn(`Exercise canonicalization skipped for session ${sessionId}:`, error);
     return rawExtraction;
