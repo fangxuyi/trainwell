@@ -23,6 +23,10 @@ Rules:
 - Record pain/discomfort observations without diagnosis
 - Preserve the supplied approximate start and end seconds for each exercise
 - Use a clear conventional canonicalName when identifiable, retain supplied spoken wording in spokenNames, and do not force an unclear match
+- Dataset candidates are retrieval hints, not proof that an exercise occurred. Use a candidate name only when it is explicitly marked recommended=true and the transcript evidence supports it.
+- When no candidate is marked recommended=true, preserve the original evidence name as canonicalName. Never choose a weaker candidate or invent another catalog exercise.
+- Do not use candidate metadata to invent performed sets, reps, weights, body regions, or coaching cues.
+- Trainer cues are workout evidence only and were intentionally excluded from dataset candidate scoring.
 - Consolidate duplicate evidence entries only when their names, timestamps, and details show that they describe the same exercise crossing a processing boundary
 - Preserve separate exercise blocks when the same movement occurred at meaningfully different times
 - Capture completed set-by-set reps and weights from the evidence timeline

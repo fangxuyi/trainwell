@@ -3,6 +3,11 @@ import type {
   ExerciseReferenceMedia,
   ExtractionOutput,
 } from "@/lib/types";
+import type {
+  DistilledExercise,
+  DistilledWorkoutTranscript,
+  ExerciseDatasetCandidate,
+} from "@/lib/transcript-distillation";
 import { unstable_cache } from "next/cache";
 
 interface DatasetExercise {
@@ -78,6 +83,27 @@ function tokenOverlap(left: string, right: string): number {
   return matches / leftTokens.size;
 }
 
+function textSimilarity(left: string, right: string): number {
+  const normalizedLeft = normalize(expandAliases(left));
+  const normalizedRight = normalize(expandAliases(right));
+  if (!normalizedLeft || !normalizedRight) return 0;
+  if (normalizedLeft === normalizedRight) return 1;
+
+  const overlap = Math.max(tokenOverlap(left, right), tokenOverlap(right, left));
+  if (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft)) {
+    return Math.max(0.9, overlap);
+  }
+  return overlap;
+}
+
+function bestFieldSimilarity(leftValues: string[], rightValues: Array<string | undefined>): number {
+  const availableRight = rightValues.filter((value): value is string => !!value);
+  if (leftValues.length === 0 || availableRight.length === 0) return 0;
+  return Math.max(
+    ...leftValues.flatMap((left) => availableRight.map((right) => textSimilarity(left, right)))
+  );
+}
+
 function datasetSearchText(exercise: DatasetExercise): string {
   return [
     exercise.name,
@@ -92,7 +118,7 @@ function datasetSearchText(exercise: DatasetExercise): string {
     .join(" ");
 }
 
-function scoreCandidate(candidate: ExerciseRecord, datasetExercise: DatasetExercise): number {
+function scoreCanonicalCandidate(candidate: ExerciseRecord, datasetExercise: DatasetExercise): number {
   if (!datasetExercise.name) return 0;
 
   const names = [candidate.canonicalName, ...candidate.spokenNames].filter(Boolean);
@@ -114,6 +140,92 @@ function scoreCandidate(candidate: ExerciseRecord, datasetExercise: DatasetExerc
   }
 
   return Math.min(score, 1);
+}
+
+function rankDistilledCandidate(
+  exercise: DistilledExercise,
+  datasetExercise: DatasetExercise
+): ExerciseDatasetCandidate | null {
+  if (!datasetExercise.name) return null;
+
+  const names = [exercise.name, ...exercise.spokenNames].filter(Boolean);
+  const nameScore = bestFieldSimilarity(names, [datasetExercise.name]);
+  const equipmentScore = bestFieldSimilarity(exercise.equipment, [datasetExercise.equipment]);
+  const bodyScore = bestFieldSimilarity(exercise.bodyRegions, [
+    datasetExercise.target,
+    datasetExercise.body_part,
+    datasetExercise.muscle_group,
+    ...(datasetExercise.secondary_muscles ?? []),
+  ]);
+  const categoryScore = exercise.category
+    ? bestFieldSimilarity([exercise.category], [datasetExercise.category])
+    : 0;
+  const movementScore = exercise.movementDescription
+    ? textSimilarity(exercise.movementDescription, datasetSearchText(datasetExercise))
+    : 0;
+
+  const weightedSignals = [
+    { present: names.length > 0, score: nameScore, weight: 0.6 },
+    { present: exercise.equipment.length > 0, score: equipmentScore, weight: 0.15 },
+    { present: exercise.bodyRegions.length > 0, score: bodyScore, weight: 0.15 },
+    { present: !!exercise.category, score: categoryScore, weight: 0.05 },
+    { present: !!exercise.movementDescription, score: movementScore, weight: 0.05 },
+  ].filter((signal) => signal.present);
+  const totalWeight = weightedSignals.reduce((total, signal) => total + signal.weight, 0);
+  const score = totalWeight > 0
+    ? weightedSignals.reduce((total, signal) => total + signal.score * signal.weight, 0) /
+      totalWeight
+    : 0;
+  if (score < 0.15) return null;
+
+  const reasons: string[] = [];
+  if (nameScore >= 0.75) reasons.push("strong spoken-name match");
+  else if (nameScore >= 0.4) reasons.push("partial spoken-name match");
+  if (equipmentScore >= 0.75) reasons.push("equipment match");
+  if (bodyScore >= 0.5) reasons.push("body-region or target match");
+  if (categoryScore >= 0.75) reasons.push("category match");
+  if (movementScore >= 0.35) reasons.push("movement description overlaps catalog metadata");
+
+  return {
+    datasetId: datasetExercise.id,
+    name: datasetExercise.name,
+    equipment: datasetExercise.equipment,
+    target: datasetExercise.target,
+    bodyPart: datasetExercise.body_part,
+    category: datasetExercise.category,
+    muscleGroup: datasetExercise.muscle_group,
+    score,
+    recommended: false,
+    reasons,
+  };
+}
+
+export async function attachExerciseDatasetCandidates(
+  distilled: DistilledWorkoutTranscript
+): Promise<DistilledWorkoutTranscript> {
+  const dataset = await getDataset();
+  return {
+    ...distilled,
+    exercises: distilled.exercises.map((exercise) => {
+      const ranked = dataset
+        .map((entry) => rankDistilledCandidate(exercise, entry))
+        .filter((candidate): candidate is ExerciseDatasetCandidate => !!candidate)
+        .sort((left, right) => right.score - left.score)
+        .slice(0, 3);
+      const top = ranked[0];
+      const runnerUp = ranked[1];
+      const hasUnambiguousRecommendation =
+        !!top && top.score >= 0.8 && (!runnerUp || top.score - runnerUp.score >= 0.08);
+
+      return {
+        ...exercise,
+        datasetCandidates: ranked.map((candidate, index) => ({
+          ...candidate,
+          recommended: index === 0 && hasUnambiguousRecommendation,
+        })),
+      };
+    }),
+  };
 }
 
 function compactDatasetEntry(entry: DatasetExercise): DatasetExercise {
@@ -204,7 +316,8 @@ function referenceMediaFor(
 
 function matchExercise(
   exercise: ExerciseRecord,
-  dataset: DatasetExercise[]
+  dataset: DatasetExercise[],
+  allowFuzzyMatch = true
 ): DatasetExercise | undefined {
   const candidateNames = [exercise.canonicalName, ...exercise.spokenNames]
     .map(normalize)
@@ -214,9 +327,13 @@ function matchExercise(
       !!datasetExercise.name && candidateNames.includes(normalize(datasetExercise.name))
   );
   if (exactMatches.length === 1) return exactMatches[0];
+  if (!allowFuzzyMatch) return undefined;
 
   const matches = dataset
-    .map((datasetExercise) => ({ datasetExercise, score: scoreCandidate(exercise, datasetExercise) }))
+    .map((datasetExercise) => ({
+      datasetExercise,
+      score: scoreCanonicalCandidate(exercise, datasetExercise),
+    }))
     .sort((left, right) => right.score - left.score);
   const best = matches[0];
   const nextBest = matches[1];
@@ -232,8 +349,12 @@ function matchExercise(
   return best.datasetExercise;
 }
 
-function canonicalizeExercise(exercise: ExerciseRecord, dataset: DatasetExercise[]): ExerciseRecord {
-  const datasetExercise = matchExercise(exercise, dataset);
+function canonicalizeExercise(
+  exercise: ExerciseRecord,
+  dataset: DatasetExercise[],
+  allowFuzzyMatch = true
+): ExerciseRecord {
+  const datasetExercise = matchExercise(exercise, dataset, allowFuzzyMatch);
   if (!datasetExercise?.name) return exercise;
 
   const sameName = normalize(exercise.canonicalName) === normalize(datasetExercise.name);
@@ -257,11 +378,14 @@ export async function enrichExercisesWithMedia(
 }
 
 export async function canonicalizeExtraction(
-  extraction: ExtractionOutput
+  extraction: ExtractionOutput,
+  options: { allowFuzzyMatch?: boolean } = {}
 ): Promise<ExtractionOutput> {
   const dataset = await getDataset();
   return {
     ...extraction,
-    exercises: extraction.exercises.map((exercise) => canonicalizeExercise(exercise, dataset)),
+    exercises: extraction.exercises.map((exercise) =>
+      canonicalizeExercise(exercise, dataset, options.allowFuzzyMatch ?? true)
+    ),
   };
 }
