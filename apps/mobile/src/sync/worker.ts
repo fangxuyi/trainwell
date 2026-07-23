@@ -1,4 +1,4 @@
-import type { SyncJob } from "@trainwell/schemas";
+import type { ProcessingStatusResponse, SyncJob } from "@trainwell/schemas";
 import {
   getPendingJobsBySession,
   getDueJobs,
@@ -112,7 +112,7 @@ async function runSyncWorkerInternal(sessionId: string): Promise<void> {
     // finished. When the app is killed mid-sync, the server-side pipeline still
     // completes; on the next run we must NOT re-trigger it (wasteful re-run of
     // Claude extraction), just pick up the finished result.
-    const initial = await apiGet<{ remoteStatus: string }>(
+    const initial = await apiGet<ProcessingStatusResponse>(
       `/api/workouts/${sessionId}/processing-status`
     );
     let remoteStatus = initial.remoteStatus;
@@ -129,18 +129,37 @@ async function runSyncWorkerInternal(sessionId: string): Promise<void> {
       let attempts = 0;
       while (attempts < MAX_POLL_ATTEMPTS) {
         await sleep(POLL_INTERVAL_MS);
-        const status = await apiGet<{ remoteStatus: string }>(
+        const status = await apiGet<ProcessingStatusResponse>(
           `/api/workouts/${sessionId}/processing-status`
         );
         remoteStatus = status.remoteStatus;
         if (remoteStatus === "review_required" || remoteStatus === "finalized") break;
         if (remoteStatus === "failed") throw new Error("Processing failed on server");
+        const retryIsDue = !status.retryAt || new Date(status.retryAt).getTime() <= Date.now();
+        const shouldKickQueue =
+          status.queueStatus === "pending" ||
+          (status.queueStatus === "retry_wait" && retryIsDue) ||
+          status.queueStatus == null ||
+          attempts % 12 === 11;
+        if (remoteStatus === "processing" && shouldKickQueue) {
+          await apiPost<unknown>(`/api/workouts/${sessionId}/process`, {}).catch((error) =>
+            console.warn("[SyncWorker] processing queue kick failed", error)
+          );
+        }
         attempts++;
       }
     }
 
     if (remoteStatus !== "review_required" && remoteStatus !== "finalized") {
-      throw new Error(`Processing timed out (status: ${remoteStatus})`);
+      await updateSessionStatus(sessionId, {
+        localStatus: "locally_complete",
+        remoteStatus: "processing",
+        syncStatus: "pending",
+      });
+      console.info(
+        `[SyncWorker] server processing continues for ${sessionId}; foreground recovery will reconcile it`
+      );
+      return;
     }
 
     // Step 5: fetch result and save locally

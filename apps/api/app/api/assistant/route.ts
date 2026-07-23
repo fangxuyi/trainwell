@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { answerWorkoutQuestion, rewriteWorkoutQuestion } from "@/lib/extract";
+import {
+  LanguageModelQueueTimeoutError,
+  LanguageModelRateLimitError,
+} from "@/lib/language-model";
 import { getUserId, unauthorized } from "@/lib/auth";
 import { retrieveWorkoutContext } from "@/lib/assistant-retrieval";
 import type { AssistantConversationMessage } from "@/lib/types";
@@ -42,9 +46,29 @@ export async function POST(req: NextRequest) {
     retrievalQuestion,
     typeof sessionId === "string" && sessionId.trim() ? sessionId : undefined
   );
-  const result = await answerWorkoutQuestion(question.trim(), retrieval.context, history);
-  return NextResponse.json({
-    ...result,
-    citations: retrieval.citations,
-  });
+  try {
+    const result = await answerWorkoutQuestion(question.trim(), retrieval.context, history);
+    return NextResponse.json({
+      ...result,
+      citations: retrieval.citations,
+    });
+  } catch (error) {
+    if (
+      error instanceof LanguageModelRateLimitError ||
+      error instanceof LanguageModelQueueTimeoutError
+    ) {
+      const retryAfterSeconds = Math.max(1, Math.ceil(error.retryAfterMs / 1_000));
+      return NextResponse.json(
+        {
+          error: "The AI assistant is temporarily busy. Please try again shortly.",
+          retryAfterSeconds,
+        },
+        {
+          status: 503,
+          headers: { "Retry-After": String(retryAfterSeconds) },
+        }
+      );
+    }
+    throw error;
+  }
 }

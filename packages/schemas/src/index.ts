@@ -337,6 +337,12 @@ export interface ProcessingStatusResponse {
   transcriptionProgress?: number;
   extractionComplete: boolean;
   summaryComplete: boolean;
+  queueStatus?: "pending" | "running" | "retry_wait" | "completed" | "failed" | null;
+  processingStage?: string | null;
+  processingMessage?: string | null;
+  processingAttemptCount?: number;
+  retryAt?: string | null;
+  rateLimited?: boolean;
   errorMessage?: string;
 }
 

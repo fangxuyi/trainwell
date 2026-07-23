@@ -10,6 +10,18 @@ import {
   distillWorkoutTranscriptWindowed,
   formatDistilledWorkoutTranscript,
 } from "./transcript-distillation";
+import { updateProcessingProgress } from "./processing-queue";
+
+const STAGE_MESSAGES: Record<string, string> = {
+  load_transcript: "Loading your transcript.",
+  distill_transcript: "Identifying exercises, sets, and coaching cues.",
+  retrieve_exercise_candidates: "Matching exercise names.",
+  synthesize_workout: "Building your structured workout recap.",
+  canonicalize_exercises: "Finalizing exercise details.",
+  load_session: "Preparing your recap.",
+  generate_summary: "Formatting your recap.",
+  persist_recap: "Saving your recap.",
+};
 
 async function timedStage<T>(
   sessionId: string,
@@ -17,6 +29,11 @@ async function timedStage<T>(
   operation: () => Promise<T>
 ): Promise<T> {
   const startedAt = Date.now();
+  await updateProcessingProgress(
+    sessionId,
+    stage,
+    STAGE_MESSAGES[stage] ?? "Processing your workout."
+  );
   console.info(`[pipeline] session=${sessionId} stage=${stage} status=started`);
   try {
     const result = await operation();

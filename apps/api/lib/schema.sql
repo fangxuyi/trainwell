@@ -78,8 +78,23 @@ CREATE TABLE IF NOT EXISTS processing_jobs (
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   type TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
+  stage TEXT,
+  message TEXT,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  available_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  lease_owner TEXT,
+  lease_expires_at TIMESTAMPTZ,
   error TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS language_model_provider_state (
+  provider TEXT PRIMARY KEY,
+  lease_owner TEXT,
+  lease_expires_at TIMESTAMPTZ,
+  blocked_until TIMESTAMPTZ,
+  last_rate_limit_error TEXT,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -169,6 +184,8 @@ CREATE INDEX IF NOT EXISTS session_chunks_content_search_idx
 CREATE INDEX IF NOT EXISTS idx_audio_segments_session ON audio_segments(session_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_transcript_session ON transcript_segments(session_id);
 CREATE INDEX IF NOT EXISTS idx_processing_jobs_session ON processing_jobs(session_id);
+CREATE INDEX IF NOT EXISTS processing_jobs_due_idx
+  ON processing_jobs(status, available_at);
 CREATE INDEX IF NOT EXISTS credit_transactions_user_idx ON credit_transactions(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS beta_invitation_codes_active_idx
   ON beta_invitation_codes(active, expires_at);

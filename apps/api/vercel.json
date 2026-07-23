@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "app/api/queues/workout-processing/route.ts": {
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "workout-processing",
+          "retryAfterSeconds": 30,
+          "initialDelaySeconds": 0
+        }
+      ]
+    }
+  }
+}
