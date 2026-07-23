@@ -151,7 +151,9 @@ For follow-up questions, clients send at most the previous ten user/assistant me
 
 All retrieval queries join chunks to `sessions`, require the current Clerk `user_id`, and require `remote_status = 'finalized'`. The web session-detail Ask link also passes its session ID so exact-session questions cannot drift into other workouts.
 
-`AI_PROVIDER` selects `anthropic` (the default) or `openai` for both workout extraction and Ask AI. The shared adapter in `apps/api/lib/language-model.ts` keeps prompts and response shapes provider-independent. `ANTHROPIC_MODEL` and `OPENAI_MODEL` are server-only overrides; changing the provider or model does not alter the mobile or web API contract.
+`AI_PROVIDER` selects `anthropic` (the default), `gemini`, or `openai` for transcript distillation, workout synthesis, Ask AI query rewriting, and answer generation. The shared adapter in `apps/api/lib/language-model.ts` keeps prompts and response shapes provider-independent. `ANTHROPIC_MODEL`, `GEMINI_MODEL`, and `OPENAI_MODEL` are server-only overrides; changing the provider or model does not alter the mobile or web API contract.
+
+The Gemini adapter defaults to `gemini-3.5-flash`, the current stable high-capability model with free-tier input and output pricing. Set `GEMINI_MODEL=gemini-2.5-pro` to use Gemini 2.5 Pro while it remains available; Google currently schedules that model to shut down on October 16, 2026. Free-tier requests are quota-limited and Google states that free-tier content may be used to improve its products. Do not treat the free tier as an unlimited production-cost guarantee, and review consent and data-handling requirements before sending public users' workout transcripts through it.
 
 If hybrid retrieval finds no matching chunks, the route falls back to the five most recent finalized session records. If Voyage is temporarily unavailable, lexical retrieval remains available.
 
@@ -299,11 +301,13 @@ The plaintext code is returned once in the response. Store and distribute it sec
 |---|---|
 | `DATABASE_URL` | Neon Postgres connection string. |
 | `GROQ_API_KEY` | Groq Whisper transcription. |
-| `AI_PROVIDER` | Language-model backend: `anthropic` (default) or `openai`. |
+| `AI_PROVIDER` | Language-model backend: `anthropic` (default), `gemini`, or `openai`; `claude` and `google` are accepted aliases. |
 | `ANTHROPIC_API_KEY` | Anthropic key, required when the provider is `anthropic`. |
 | `ANTHROPIC_MODEL` | Optional Anthropic model override. |
 | `OPENAI_API_KEY` | OpenAI key, required when the provider is `openai`. |
 | `OPENAI_MODEL` | Optional OpenAI model override. |
+| `GEMINI_API_KEY` | Google AI Studio Gemini API key, required when the provider is `gemini`. |
+| `GEMINI_MODEL` | Optional Gemini model override; defaults to `gemini-3.5-flash`, with `gemini-2.5-pro` also supported while available. |
 | `VOYAGE_API_KEY` | Session and question embeddings. |
 | `BLOB_READ_WRITE_TOKEN` | Private Vercel Blob access and presigned uploads. |
 | `ADMIN_SECRET` | Protects database migration and backfill routes. |
