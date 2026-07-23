@@ -1,4 +1,5 @@
 import { generateText } from "@/lib/language-model";
+import { DISTILLATION_JSON_SCHEMA } from "@/lib/structured-output-schemas";
 
 const DISTILLATION_VERSION = "1.1-candidate-ready";
 const DISTILLATION_WINDOW_SECONDS = 900;
@@ -305,6 +306,9 @@ async function distillWindow(
   const text = await generateText({
     system: DISTILLATION_SYSTEM_PROMPT,
     maxOutputTokens: 4096,
+    jsonSchema: DISTILLATION_JSON_SCHEMA,
+    schemaName: "workout_evidence_distillation",
+    maxQueueWaitMs: 180_000,
     prompt: `Distill workout evidence for session ${sessionId}, window ${windowIndex + 1}.
 
 TRANSCRIPT:
@@ -362,15 +366,16 @@ export async function distillWorkoutTranscriptWindowed(
   }
   if (current.length > 0) windows.push(current);
 
-  const partials = await Promise.all(
-    windows.map((window, index) =>
-      distillWindow(
+  const partials: DistilledWorkoutTranscript[] = [];
+  for (const [index, window] of windows.entries()) {
+    partials.push(
+      await distillWindow(
         sessionId,
         windows.length === 1 ? formatWindow(window) : scopedWindowTranscript(windows, index),
         index
       )
-    )
-  );
+    );
+  }
 
   return {
     sessionId,

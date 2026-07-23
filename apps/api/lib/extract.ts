@@ -7,6 +7,7 @@ import type {
   SourcedNote,
 } from "@/lib/types";
 import { generateText } from "@/lib/language-model";
+import { EXTRACTION_JSON_SCHEMA } from "@/lib/structured-output-schemas";
 
 const EXTRACTION_VERSION = "2.0-two-stage";
 
@@ -269,6 +270,9 @@ export async function synthesizeWorkoutData(
   const text = await generateText({
     system: SYNTHESIS_SYSTEM_PROMPT,
     maxOutputTokens: 6144,
+    jsonSchema: EXTRACTION_JSON_SCHEMA,
+    schemaName: "workout_extraction",
+    maxQueueWaitMs: 180_000,
     prompt: `Synthesize the final workout record for session ${sessionId}.
 
 DISTILLED WORKOUT TRANSCRIPT:

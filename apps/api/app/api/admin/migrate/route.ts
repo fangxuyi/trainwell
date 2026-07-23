@@ -42,6 +42,50 @@ export async function POST(req: NextRequest) {
   `;
 
   await sql`
+    CREATE TABLE IF NOT EXISTS processing_jobs (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      stage TEXT,
+      message TEXT,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      available_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      lease_owner TEXT,
+      lease_expires_at TIMESTAMPTZ,
+      error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`ALTER TABLE processing_jobs ADD COLUMN IF NOT EXISTS stage TEXT`;
+  await sql`ALTER TABLE processing_jobs ADD COLUMN IF NOT EXISTS message TEXT`;
+  await sql`
+    ALTER TABLE processing_jobs
+    ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0
+  `;
+  await sql`
+    ALTER TABLE processing_jobs
+    ADD COLUMN IF NOT EXISTS available_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  `;
+  await sql`ALTER TABLE processing_jobs ADD COLUMN IF NOT EXISTS lease_owner TEXT`;
+  await sql`ALTER TABLE processing_jobs ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ`;
+  await sql`
+    CREATE INDEX IF NOT EXISTS processing_jobs_due_idx
+    ON processing_jobs(status, available_at)
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS language_model_provider_state (
+      provider TEXT PRIMARY KEY,
+      lease_owner TEXT,
+      lease_expires_at TIMESTAMPTZ,
+      blocked_until TIMESTAMPTZ,
+      last_rate_limit_error TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+
+  await sql`
     CREATE TABLE IF NOT EXISTS credit_accounts (
       user_id TEXT PRIMARY KEY,
       permanent_credits INTEGER NOT NULL DEFAULT 100 CHECK (permanent_credits >= 0),

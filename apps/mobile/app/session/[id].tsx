@@ -1,4 +1,4 @@
-import type { WorkoutSession } from "@trainwell/schemas";
+import type { ProcessingStatusResponse, WorkoutSession } from "@trainwell/schemas";
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
@@ -22,7 +22,7 @@ import {
 import { HeaderAction, ScreenHeader } from "../../src/ui/ScreenHeader";
 import { sessionStatusPresentation } from "../../src/ui/sessionPresentation";
 import { colors, radii } from "../../src/ui/theme";
-import { apiDelete } from "../../src/utils/api";
+import { apiDelete, apiGet } from "../../src/utils/api";
 import { formatDuration } from "../../src/utils/time";
 
 const SYNCING_STATUSES = new Set(["syncing", "locally_complete"]);
@@ -35,6 +35,7 @@ export default function SessionDetailScreen() {
   const [noteCount, setNoteCount] = useState(0);
   const [recovering, setRecovering] = useState(false);
   const [previewExerciseId, setPreviewExerciseId] = useState<string | null>(null);
+  const [processingStatus, setProcessingStatus] = useState<ProcessingStatusResponse | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadAll = useCallback(async () => {
@@ -53,9 +54,15 @@ export default function SessionDetailScreen() {
       loadAll().then((currentSession) => {
         if (currentSession && SYNCING_STATUSES.has(currentSession.localStatus)) {
           pollRef.current = setInterval(async () => {
-            const refreshed = await getSessionById(id);
+            const [refreshed, remoteProcessingStatus] = await Promise.all([
+              getSessionById(id),
+              apiGet<ProcessingStatusResponse>(`/api/workouts/${id}/processing-status`).catch(
+                () => null
+              ),
+            ]);
             if (!refreshed) return;
             setSession(refreshed);
+            if (remoteProcessingStatus) setProcessingStatus(remoteProcessingStatus);
             if (!SYNCING_STATUSES.has(refreshed.localStatus)) {
               clearInterval(pollRef.current!);
               pollRef.current = null;
@@ -186,10 +193,21 @@ export default function SessionDetailScreen() {
             <View style={styles.noticeCopy}>
               <Text style={styles.syncingTitle}>Building your recap</Text>
               <Text style={styles.syncingText}>
-                {session.localStatus === "syncing"
-                  ? "Uploading and processing your session."
-                  : "Preparing your recording for sync."}
+                {processingStatus?.processingMessage ??
+                  (session.localStatus === "syncing"
+                    ? "Uploading and processing your session."
+                    : "Preparing your recording for sync.")}
               </Text>
+              {processingStatus?.rateLimited && processingStatus.retryAt && (
+                <Text style={styles.retryText}>
+                  Automatic retry scheduled for{" "}
+                  {new Date(processingStatus.retryAt).toLocaleTimeString([], {
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
+                  .
+                </Text>
+              )}
             </View>
           </View>
         )}
@@ -461,6 +479,7 @@ const styles = StyleSheet.create({
   noticeCopy: { flex: 1 },
   syncingTitle: { color: colors.warning, fontSize: 13, fontWeight: "800" },
   syncingText: { color: colors.textMuted, fontSize: 10, lineHeight: 15, marginTop: 3 },
+  retryText: { color: colors.warning, fontSize: 10, lineHeight: 15, marginTop: 4 },
   interruptedCard: { borderRadius: radii.large, backgroundColor: "rgba(244, 199, 107, 0.08)", borderWidth: 1, borderColor: "rgba(244, 199, 107, 0.22)", padding: 18, marginBottom: 12 },
   noticeEyebrow: { color: colors.warning, fontSize: 8, fontWeight: "900", letterSpacing: 1.3 },
   interruptedTitle: { color: colors.text, fontSize: 18, lineHeight: 22, fontWeight: "900", marginTop: 8 },
