@@ -304,6 +304,9 @@ export interface CreditBalance {
   subscriptionCredits: number;
   subscriptionTier: string | null;
   subscriptionPeriodEnd: string | null;
+  stripeBillingStatus: string | null;
+  stripeBillingMessage: string | null;
+  stripeBillingUpdatedAt: string | null;
 }
 
 export interface CreateSessionRequest {

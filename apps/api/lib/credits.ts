@@ -6,6 +6,9 @@ export interface CreditBalance {
   subscriptionCredits: number;
   subscriptionTier: string | null;
   subscriptionPeriodEnd: string | null;
+  stripeBillingStatus: string | null;
+  stripeBillingMessage: string | null;
+  stripeBillingUpdatedAt: string | null;
 }
 
 export class InsufficientCreditsError extends Error {
@@ -19,6 +22,43 @@ export class InsufficientCreditsError extends Error {
 
 export function creditsForDuration(durationSeconds: number): number {
   return Math.max(1, Math.ceil(Math.max(0, durationSeconds) / 60));
+}
+
+interface StripeBillingStatusRecord {
+  status: string | null;
+  message: string | null;
+  source: string;
+  occurredAt: string;
+}
+
+function currentStripeBillingStatus(
+  rows: { payload: unknown }[]
+): Pick<
+  CreditBalance,
+  "stripeBillingStatus" | "stripeBillingMessage" | "stripeBillingUpdatedAt"
+> {
+  const seenSources = new Set<string>();
+  for (const row of rows) {
+    const record = row.payload as StripeBillingStatusRecord;
+    if (!record?.source || !record.occurredAt) continue;
+    const sourceGroup = record.source.startsWith("checkout:")
+      ? "checkout"
+      : record.source;
+    if (seenSources.has(sourceGroup)) continue;
+    seenSources.add(sourceGroup);
+    if (record.status) {
+      return {
+        stripeBillingStatus: record.status,
+        stripeBillingMessage: record.message,
+        stripeBillingUpdatedAt: record.occurredAt,
+      };
+    }
+  }
+  return {
+    stripeBillingStatus: null,
+    stripeBillingMessage: null,
+    stripeBillingUpdatedAt: null,
+  };
 }
 
 export async function getCreditBalance(userId: string): Promise<CreditBalance> {
@@ -36,15 +76,28 @@ export async function getCreditBalance(userId: string): Promise<CreditBalance> {
       AND subscription_period_end <= now()
   `;
 
-  const rows = await sql`
-    SELECT permanent_credits, subscription_credits, subscription_tier,
-           subscription_period_end
-    FROM credit_accounts
-    WHERE user_id = ${userId}
-  `;
+  const [rows, billingStatusRows] = await Promise.all([
+    sql`
+      SELECT permanent_credits, subscription_credits, subscription_tier,
+             subscription_period_end
+      FROM credit_accounts
+      WHERE user_id = ${userId}
+    `,
+    sql`
+      SELECT payload
+      FROM billing_events
+      WHERE user_id = ${userId}
+        AND type = 'stripe.billing_status'
+      ORDER BY (payload->>'occurredAt')::timestamptz DESC, created_at DESC
+      LIMIT 100
+    `,
+  ]);
   const row = rows[0];
   const permanentCredits = Number(row.permanent_credits);
   const subscriptionCredits = Number(row.subscription_credits);
+  const billingStatus = currentStripeBillingStatus(
+    billingStatusRows as { payload: unknown }[]
+  );
   return {
     totalCredits: permanentCredits + subscriptionCredits,
     permanentCredits,
@@ -53,6 +106,7 @@ export async function getCreditBalance(userId: string): Promise<CreditBalance> {
     subscriptionPeriodEnd: row.subscription_period_end
       ? new Date(row.subscription_period_end as string).toISOString()
       : null,
+    ...billingStatus,
   };
 }
 
@@ -90,6 +144,11 @@ interface BillingEventInput {
   type: string;
   productId: string;
   payload: unknown;
+}
+
+interface StripeBillingStatusInput extends BillingEventInput {
+  source: string;
+  occurredAt: string;
 }
 
 export async function grantPermanentCredits(
@@ -130,6 +189,50 @@ export async function expireSubscriptionCredits(
       ${event.id}, ${event.userId}, ${source}, ${event.type}, ${event.productId},
       ${JSON.stringify(event.payload)}::jsonb
     )
+  `;
+}
+
+export async function setStripeBillingStatus(
+  event: StripeBillingStatusInput,
+  status: string,
+  message: string
+): Promise<void> {
+  await sql`SELECT ensure_credit_account(${event.userId})`;
+  await sql`
+    INSERT INTO billing_events (id, user_id, type, product_id, payload)
+    VALUES (
+      ${event.id}, ${event.userId}, 'stripe.billing_status', ${event.productId},
+      ${JSON.stringify({
+        status,
+        message,
+        source: event.source,
+        occurredAt: event.occurredAt,
+        eventType: event.type,
+        event: event.payload,
+      })}::jsonb
+    )
+    ON CONFLICT (id) DO NOTHING
+  `;
+}
+
+export async function clearStripeBillingStatus(
+  event: StripeBillingStatusInput
+): Promise<void> {
+  await sql`SELECT ensure_credit_account(${event.userId})`;
+  await sql`
+    INSERT INTO billing_events (id, user_id, type, product_id, payload)
+    VALUES (
+      ${event.id}, ${event.userId}, 'stripe.billing_status', ${event.productId},
+      ${JSON.stringify({
+        status: null,
+        message: null,
+        source: event.source,
+        occurredAt: event.occurredAt,
+        eventType: event.type,
+        event: event.payload,
+      })}::jsonb
+    )
+    ON CONFLICT (id) DO NOTHING
   `;
 }
 

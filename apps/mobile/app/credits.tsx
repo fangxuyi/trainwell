@@ -111,6 +111,15 @@ export default function CreditsScreen() {
         One credit covers one started minute of transcription.
       </Text>
 
+      {balance?.stripeBillingStatus ? (
+        <View style={styles.billingAlert}>
+          <Text style={styles.billingAlertTitle}>Payment needs attention</Text>
+          <Text style={styles.billingAlertMessage}>
+            {balance.stripeBillingMessage ?? "Update your payment method in the web billing portal."}
+          </Text>
+        </View>
+      ) : null}
+
       <View style={styles.balanceCard}>
         <View style={styles.balanceOrb} />
         <Text style={styles.balanceLabel}>AVAILABLE NOW</Text>
@@ -192,6 +201,16 @@ const styles = StyleSheet.create({
   eyebrow: { color: colors.accent, fontSize: 9, fontWeight: "900", letterSpacing: 1.6, marginTop: 4 },
   title: { color: colors.text, fontSize: 32, fontWeight: "900", letterSpacing: -1, marginTop: 7 },
   subtitle: { color: colors.textMuted, fontSize: 13, lineHeight: 19, marginTop: 7, marginBottom: 22 },
+  billingAlert: {
+    borderRadius: radii.medium,
+    borderWidth: 1,
+    borderColor: "rgba(255, 125, 125, 0.25)",
+    backgroundColor: "rgba(58, 30, 36, 0.7)",
+    padding: 16,
+    marginBottom: 12,
+  },
+  billingAlertTitle: { color: "#FFD0D0", fontSize: 14, fontWeight: "900" },
+  billingAlertMessage: { color: "#FFB0B0", fontSize: 11, lineHeight: 17, marginTop: 5 },
   balanceCard: { backgroundColor: colors.accent, borderRadius: 28, padding: 22, overflow: "hidden" },
   balanceOrb: {
     position: "absolute",

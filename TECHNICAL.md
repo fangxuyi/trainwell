@@ -197,7 +197,7 @@ Products currently defined in `apps/api/lib/billing.ts`:
 | Monthly 300 | 300 credits per period | $6.99/month | Subscription |
 | Monthly 800 | 800 credits per period | $15.99/month | Subscription |
 
-Web purchases use Stripe Checkout. Webhook events grant credits; the checkout redirect never grants value. Stripe’s customer portal handles cancellation and payment methods.
+Web purchases use Stripe Checkout. Verified webhook events grant credits; the checkout redirect never grants value. The Stripe webhook records asynchronous Checkout failures, failed or action-required subscription invoices, and delinquent subscription status changes. These failures are exposed through the credit-balance API and shown in the web portal and mobile account surfaces. Subscription credits are not revoked on the first failed charge because Stripe may retry it; cancellation or period expiry still removes the allowance. A later successful invoice clears the matching failure state. Stripe’s customer portal handles cancellation and payment methods.
 
 iOS purchases use StoreKit through RevenueCat, with the Clerk user ID as the RevenueCat App User ID. The code and webhook route are present, but mobile purchasing is not production-ready until Apple Developer membership, App Store Connect products, RevenueCat offerings, and release credentials are configured. Purchases require a development or release build and do not work in Expo Go.
 
