@@ -35,6 +35,13 @@ export default async function CreditsPage({ searchParams }: { searchParams: Prom
         </div>
       )}
 
+      {balance.stripeBillingStatus && (
+        <div className="mt-6 rounded-2xl border border-[#FF7D7D]/25 bg-[#3A1E24]/55 p-4 text-sm text-[#FFB0B0]">
+          <p className="font-black text-[#FFD0D0]">Payment needs attention</p>
+          <p className="mt-1 leading-6">{balance.stripeBillingMessage ?? "Open billing to update your payment method."}</p>
+        </div>
+      )}
+
       <section className="relative my-7 overflow-hidden rounded-[30px] bg-[#C7F36B] p-6 text-[#101707] shadow-[0_24px_70px_rgba(199,243,107,0.1)] sm:p-8">
         <div className="absolute -right-16 -top-24 size-72 rounded-full border-[48px] border-[#101707]/[0.055]" />
         <div className="relative grid gap-7 sm:grid-cols-[1fr_auto] sm:items-end">

@@ -146,6 +146,18 @@ export function AccountDrawer({ visible, balance, onClose }: AccountDrawerProps)
             </View>
           </View>
 
+          {balance?.stripeBillingStatus ? (
+            <TouchableOpacity style={styles.billingAlert} onPress={() => navigate("/credits")}>
+              <View style={styles.billingAlertText}>
+                <Text style={styles.billingAlertTitle}>Payment needs attention</Text>
+                <Text style={styles.billingAlertDetail} numberOfLines={2}>
+                  {balance.stripeBillingMessage ?? "Open credits and billing for details."}
+                </Text>
+              </View>
+              <Text style={styles.billingAlertArrow}>›</Text>
+            </TouchableOpacity>
+          ) : null}
+
           <View style={styles.menuSection}>
             <Text style={styles.menuLabel}>QUICK LINKS</Text>
             <DrawerItem title="Credits & plans" detail="Balance and purchases" onPress={() => navigate("/credits")} />
@@ -296,6 +308,20 @@ const styles = StyleSheet.create({
   planLabel: { color: colors.textFaint, fontSize: 9, fontWeight: "900", letterSpacing: 1.2 },
   planName: { color: colors.text, fontSize: 14, fontWeight: "800", marginTop: 3, textTransform: "capitalize" },
   planDetail: { color: colors.textMuted, fontSize: 11, marginTop: 3 },
+  billingAlert: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 125, 125, 0.25)",
+    backgroundColor: "rgba(58, 30, 36, 0.7)",
+    borderRadius: radii.medium,
+    padding: 13,
+    marginTop: 10,
+  },
+  billingAlertText: { flex: 1 },
+  billingAlertTitle: { color: "#FFD0D0", fontSize: 12, fontWeight: "900" },
+  billingAlertDetail: { color: "#FFB0B0", fontSize: 10, lineHeight: 15, marginTop: 3 },
+  billingAlertArrow: { color: colors.danger, fontSize: 22, marginLeft: 10 },
   menuSection: { marginTop: 28 },
   menuLabel: { color: colors.textFaint, fontSize: 10, fontWeight: "900", letterSpacing: 1.5, marginBottom: 6 },
   menuItem: {
