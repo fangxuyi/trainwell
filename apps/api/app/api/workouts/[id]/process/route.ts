@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: sessionId } = await params;
@@ -22,14 +22,17 @@ export async function POST(
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
-  if (
-    sessions[0].remote_status === "review_required" ||
-    sessions[0].remote_status === "finalized"
-  ) {
-    return NextResponse.json({ status: sessions[0].remote_status });
+  const body = (await req.json().catch(() => ({}))) as { reprocess?: boolean };
+  const remoteStatus = String(sessions[0].remote_status);
+  if (remoteStatus === "finalized") {
+    return NextResponse.json({ status: remoteStatus });
+  }
+  const forceReprocess = body.reprocess === true && remoteStatus === "review_required";
+  if (remoteStatus === "review_required" && !forceReprocess) {
+    return NextResponse.json({ status: remoteStatus });
   }
 
-  const job = await enqueueProcessingJob(sessionId);
+  const job = await enqueueProcessingJob(sessionId, { force: forceReprocess });
 
   await sql`
     UPDATE sessions
