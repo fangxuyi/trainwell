@@ -13,7 +13,11 @@ import {
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { ExerciseMediaPreview } from "../../src/components/ExerciseMediaPreview";
 import { getNotesBySession } from "../../src/db/quickNotes";
-import { deleteSession, getSessionById } from "../../src/db/sessions";
+import {
+  deleteSession,
+  getSessionById,
+  upsertSessionsFromServer,
+} from "../../src/db/sessions";
 import { deleteLocalAudio } from "../../src/storage/audioFiles";
 import {
   processInterruptedRecording,
@@ -46,6 +50,15 @@ export default function SessionDetailScreen() {
     setSession(currentSession);
     setNoteCount(notes.length);
     setLoading(false);
+
+    apiGet<Record<string, unknown>>(`/api/workouts/${id}`)
+      .then((remote) => upsertSessionsFromServer([remote]))
+      .then(() => getSessionById(id))
+      .then((refreshed) => {
+        if (refreshed) setSession(refreshed);
+      })
+      .catch(() => {});
+
     return currentSession;
   }, [id]);
 
