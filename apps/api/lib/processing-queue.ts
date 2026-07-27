@@ -76,9 +76,13 @@ export function ensureProcessingQueueSchema(): Promise<void> {
   return schemaPromise;
 }
 
-export async function enqueueProcessingJob(sessionId: string): Promise<ProcessingJobState> {
+export async function enqueueProcessingJob(
+  sessionId: string,
+  options: { force?: boolean } = {}
+): Promise<ProcessingJobState> {
   await ensureProcessingQueueSchema();
   const id = `process:${sessionId}`;
+  const force = options.force === true;
   const rows = await sql`
     INSERT INTO processing_jobs (
       id, session_id, type, status, stage, message, available_at
@@ -88,22 +92,32 @@ export async function enqueueProcessingJob(sessionId: string): Promise<Processin
     )
     ON CONFLICT (id) DO UPDATE SET
       status = CASE
+        WHEN ${force} THEN 'pending'
         WHEN processing_jobs.status IN ('completed', 'running') THEN processing_jobs.status
         ELSE 'pending'
       END,
       stage = CASE
+        WHEN ${force} THEN 'queued'
         WHEN processing_jobs.status IN ('completed', 'running') THEN processing_jobs.stage
         ELSE 'queued'
       END,
       message = CASE
+        WHEN ${force} THEN 'Your recap is queued for processing.'
         WHEN processing_jobs.status IN ('completed', 'running') THEN processing_jobs.message
         ELSE 'Your recap is queued for processing.'
       END,
       available_at = CASE
+        WHEN ${force} THEN now()
         WHEN processing_jobs.status = 'retry_wait' THEN processing_jobs.available_at
         ELSE now()
       END,
+      lease_owner = CASE WHEN ${force} THEN NULL ELSE processing_jobs.lease_owner END,
+      lease_expires_at = CASE
+        WHEN ${force} THEN NULL
+        ELSE processing_jobs.lease_expires_at
+      END,
       error = CASE
+        WHEN ${force} THEN NULL
         WHEN processing_jobs.status IN ('completed', 'running') THEN processing_jobs.error
         ELSE NULL
       END,
