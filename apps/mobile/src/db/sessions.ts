@@ -395,6 +395,72 @@ export async function upsertSessionsFromServer(
       ] as (string | number | boolean | null)[]
     );
 
+    const incomingRemoteVersion = (r.remote_version as number | null) ?? null;
+    if (isReady && incomingRemoteVersion != null) {
+      await db.runAsync(
+        `UPDATE sessions SET
+           exercises = ?,
+           session_notes = ?,
+           technique_themes = ?,
+           accomplishments = ?,
+           improvement_areas = ?,
+           pain_observations = ?,
+           next_session_plan = ?,
+           overall_difficulty = ?,
+           energy_level = ?,
+           extraction_version = ?,
+           markdown_content = ?,
+           remote_status = ?,
+           remote_version = ?,
+           summary_version = COALESCE(?, summary_version),
+           updated_at = ?
+         WHERE id = ? AND user_id = ?
+           AND local_status = 'cached'
+           AND sync_status = 'synchronized'
+           AND (
+             COALESCE(remote_version, -1) < ?
+             OR COALESCE(extraction_version, '') <> COALESCE(?, '')
+             OR COALESCE(markdown_content, '') <> COALESCE(?, '')
+           )`,
+        [
+          typeof r.exercises === "string" ? r.exercises : JSON.stringify(r.exercises ?? []),
+          typeof r.session_notes === "string"
+            ? r.session_notes
+            : JSON.stringify(r.session_notes ?? []),
+          typeof r.technique_themes === "string"
+            ? r.technique_themes
+            : JSON.stringify(r.technique_themes ?? []),
+          typeof r.accomplishments === "string"
+            ? r.accomplishments
+            : JSON.stringify(r.accomplishments ?? []),
+          typeof r.improvement_areas === "string"
+            ? r.improvement_areas
+            : JSON.stringify(r.improvement_areas ?? []),
+          typeof r.pain_observations === "string"
+            ? r.pain_observations
+            : JSON.stringify(r.pain_observations ?? []),
+          r.next_session_plan
+            ? typeof r.next_session_plan === "string"
+              ? r.next_session_plan
+              : JSON.stringify(r.next_session_plan)
+            : null,
+          r.overall_difficulty ?? null,
+          r.energy_level ?? null,
+          r.extraction_version ?? null,
+          r.markdown_content ?? null,
+          remoteStatus,
+          incomingRemoteVersion,
+          (r.summary_version as string | null) ?? null,
+          r.updated_at ?? ts,
+          r.id as string,
+          currentUserId,
+          incomingRemoteVersion,
+          (r.extraction_version as string | null) ?? null,
+          (r.markdown_content as string | null) ?? null,
+        ] as (string | number | boolean | null)[]
+      );
+    }
+
     await db.runAsync(
       `UPDATE sessions SET
          remote_status = ?,
@@ -404,7 +470,7 @@ export async function upsertSessionsFromServer(
          AND local_status NOT IN ('recording', 'paused')`,
       [
         remoteStatus,
-        (r.remote_version as number | null) ?? null,
+        incomingRemoteVersion,
         (r.summary_version as string | null) ?? null,
         r.id as string,
         currentUserId,
