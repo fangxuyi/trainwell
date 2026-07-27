@@ -10,13 +10,6 @@ export type TranscriptWindowSegment = {
   text: string;
 };
 
-export type DistilledExerciseStatus =
-  | "performed"
-  | "active_instruction"
-  | "planned_future"
-  | "mentioned_only"
-  | "unclear";
-
 type DistilledSet = {
   setNumber?: number;
   status: "completed" | "planned" | "unclear";
@@ -51,7 +44,7 @@ export type DistilledExercise = {
   category?: string;
   startedAtSeconds?: number;
   endedAtSeconds?: number;
-  status: DistilledExerciseStatus;
+  status: "completed" | "planned" | "unclear";
   equipment: string[];
   sets: DistilledSet[];
   cues: string[];
@@ -90,12 +83,7 @@ Rules:
 - Describe the movement mechanics concisely when they are stated or directly observable from the conversation. Do not fill in generic textbook instructions.
 - Include body regions and category only when the transcript supports them. Do not infer them solely from general knowledge of an exercise name.
 - Keep cues specific to this session. Omit generic instructions and unrelated conversation.
-- Classify every exercise as performed, active_instruction, planned_future, mentioned_only, or unclear.
-- Use performed only when the transcript contains action evidence such as counted reps, completed sets, weight being used, ongoing form corrections during execution, or explicit completion language.
-- Use active_instruction when the trainer is setting up or directly instructing the movement for the current session but performance is not yet confirmed.
-- Use planned_future for an exercise proposed for later or a future session.
-- Use mentioned_only for examples, comparisons, stories, another person's training, or an exercise discussed without current instruction or execution.
-- Use unclear when there is not enough context to choose another classification. Do not upgrade unclear or mentioned_only to performed.
+- Distinguish completed work from plans or next-session suggestions.
 - Preserve trainer-spoken exercise names. Use a conventional exercise name only when identifiable; otherwise use the clearest transcript wording.
 - Never invent missing sets, reps, weights, times, cues, or outcomes.
 - The transcript may mix Chinese and English. Produce concise English evidence without changing measurements.
@@ -113,7 +101,7 @@ const DISTILLATION_SCHEMA = `{
       "category": "strength | mobility | balance | cardio | recovery | other | null",
       "startedAtSeconds": 0,
       "endedAtSeconds": 120,
-      "status": "performed | active_instruction | planned_future | mentioned_only | unclear",
+      "status": "completed | planned | unclear",
       "equipment": ["equipment"],
       "sets": [
         {
@@ -173,20 +161,8 @@ function parseJsonObject(text: string): JsonRecord {
   return parsed;
 }
 
-function normalizeSetStatus(value: unknown): "completed" | "planned" | "unclear" {
+function normalizeStatus(value: unknown): "completed" | "planned" | "unclear" {
   if (value === "completed" || value === "planned") return value;
-  return "unclear";
-}
-
-function normalizeExerciseStatus(value: unknown): DistilledExerciseStatus {
-  if (
-    value === "performed" ||
-    value === "active_instruction" ||
-    value === "planned_future" ||
-    value === "mentioned_only"
-  ) {
-    return value;
-  }
   return "unclear";
 }
 
@@ -194,7 +170,7 @@ function normalizeSet(value: unknown, index: number): DistilledSet | null {
   if (!isRecord(value)) return null;
   return {
     setNumber: optionalNumber(value.setNumber) ?? index + 1,
-    status: normalizeSetStatus(value.status),
+    status: normalizeStatus(value.status),
     reps: optionalNumber(value.reps),
     weightValue: optionalNumber(value.weightValue),
     weightUnit: optionalString(value.weightUnit),
@@ -229,7 +205,7 @@ function normalizeExercise(
     category: optionalString(value.category),
     startedAtSeconds: optionalNumber(value.startedAtSeconds),
     endedAtSeconds: optionalNumber(value.endedAtSeconds),
-    status: normalizeExerciseStatus(value.status),
+    status: normalizeStatus(value.status),
     equipment: stringArray(value.equipment),
     sets,
     cues: stringArray(value.cues),
@@ -402,9 +378,6 @@ function formatOptionalNumber(value: number | undefined): string {
 export function formatDistilledWorkoutTranscript(
   distilled: DistilledWorkoutTranscript
 ): string {
-  const synthesisExercises = distilled.exercises.filter(
-    (exercise) => exercise.status !== "mentioned_only"
-  );
   const lines = [
     `DISTILLED WORKOUT TRANSCRIPT v${distilled.distillationVersion}`,
     `Session: ${distilled.sessionId}`,
@@ -412,9 +385,9 @@ export function formatDistilledWorkoutTranscript(
     "EXERCISE TIMELINE",
   ];
 
-  if (synthesisExercises.length === 0) lines.push("No actionable exercise evidence identified.");
+  if (distilled.exercises.length === 0) lines.push("No exercise evidence identified.");
 
-  synthesisExercises.forEach((exercise, index) => {
+  distilled.exercises.forEach((exercise, index) => {
     lines.push(
       "",
       `Exercise evidence ${index + 1}: ${exercise.name}`,
