@@ -1,22 +1,12 @@
 import sql from "./db";
-import { synthesizeWorkoutData } from "./extract";
+import { extractWorkoutDataWindowed } from "./extract";
 import { generateSummaryText } from "./markdown";
-import {
-  attachExerciseDatasetCandidates,
-  canonicalizeExtraction,
-  preloadExerciseDataset,
-} from "./exercise-dataset";
-import {
-  distillWorkoutTranscriptWindowed,
-  formatDistilledWorkoutTranscript,
-} from "./transcript-distillation";
+import { canonicalizeExtraction, preloadExerciseDataset } from "./exercise-dataset";
 import { updateProcessingProgress } from "./processing-queue";
 
 const STAGE_MESSAGES: Record<string, string> = {
   load_transcript: "Loading your transcript.",
-  distill_transcript: "Identifying exercises, sets, and coaching cues.",
-  retrieve_exercise_candidates: "Matching exercise names.",
-  synthesize_workout: "Building your structured workout recap.",
+  extract_workout: "Identifying exercises, sets, and coaching cues.",
   canonicalize_exercises: "Finalizing exercise details.",
   load_session: "Preparing your recap.",
   generate_summary: "Formatting your recap.",
@@ -85,12 +75,12 @@ export async function transcribeAndExtract(sessionId: string): Promise<void> {
     );
   }
 
-  // First isolate transcript-supported exercise evidence into a compact,
-  // window-safe timeline. Then synthesize one coherent workout record from
-  // that reduced transcript so session-level conclusions see the whole workout.
+  // Extract workout data with the configured language-model provider. Long
+  // sessions are split into time windows and extracted in parallel; short
+  // sessions still run as one call.
   preloadExerciseDataset();
-  const distilled = await timedStage(sessionId, "distill_transcript", () =>
-    distillWorkoutTranscriptWindowed(
+  const rawExtraction = await timedStage(sessionId, "extract_workout", () =>
+    extractWorkoutDataWindowed(
       sessionId,
       transcriptRows.map((s) => ({
         startSeconds: s.start_seconds as number,
@@ -98,20 +88,8 @@ export async function transcribeAndExtract(sessionId: string): Promise<void> {
       }))
     )
   );
-  const groundedDistillation = await timedStage(
-    sessionId,
-    "retrieve_exercise_candidates",
-    () => attachExerciseDatasetCandidates(distilled)
-  ).catch((error) => {
-    console.warn(`Exercise candidate retrieval skipped for session ${sessionId}:`, error);
-    return distilled;
-  });
-  const distilledTranscript = formatDistilledWorkoutTranscript(groundedDistillation);
-  const rawExtraction = await timedStage(sessionId, "synthesize_workout", () =>
-    synthesizeWorkoutData(sessionId, distilledTranscript)
-  );
   const extraction = await timedStage(sessionId, "canonicalize_exercises", () =>
-    canonicalizeExtraction(rawExtraction, { allowFuzzyMatch: false })
+    canonicalizeExtraction(rawExtraction)
   ).catch((error) => {
     console.warn(`Exercise canonicalization skipped for session ${sessionId}:`, error);
     return rawExtraction;
