@@ -1,8 +1,11 @@
-import type { ExtractionOutput, SourcedValue } from "@/lib/types";
+import type { ExerciseRecord, ExtractionOutput, SourcedValue } from "@/lib/types";
 import { generateText } from "@/lib/language-model";
-import { EXTRACTION_JSON_SCHEMA } from "@/lib/structured-output-schemas";
+import {
+  BOUNDARY_RECONCILIATION_JSON_SCHEMA,
+  EXTRACTION_JSON_SCHEMA,
+} from "@/lib/structured-output-schemas";
 
-const EXTRACTION_VERSION = "1.0";
+const EXTRACTION_VERSION = "1.1-boundary";
 
 const SYSTEM_PROMPT = `You are a workout data extraction assistant. Your job is to analyze a workout session transcript and extract structured exercise data.
 
@@ -125,6 +128,7 @@ ${OUTPUT_SCHEMA}`,
 // extracted in parallel, and merged to keep each request bounded.
 const EXTRACTION_WINDOW_SECONDS = 900; // 15 minutes
 const EXTRACTION_CONTEXT_SECONDS = 90;
+const BOUNDARY_RECONCILIATION_SECONDS = 180;
 
 type WindowSegment = { startSeconds: number; text: string };
 
@@ -190,7 +194,18 @@ export async function extractWorkoutDataWindowed(
       extractWorkoutData(sessionId, scopedWindowTranscript(windows, index), scopeInstruction)
     )
   );
-  return mergeExtractions(sessionId, partials);
+  const merged = mergeExtractions(sessionId, partials);
+  const exercises = await reconcileBoundaryExercises(
+    sessionId,
+    segments,
+    windows,
+    partials
+  );
+  return {
+    ...merged,
+    extractionVersion: EXTRACTION_VERSION,
+    exercises,
+  };
 }
 
 function uniqueStrings(arr: string[]): string[] {
@@ -205,10 +220,6 @@ function bestSourced(
     .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))[0];
 }
 
-// Merges per-window extractions into one. Exercises are kept (ordered by time,
-// re-sequenced); string lists are concatenated + de-duped; session-level scalar
-// values take the highest-confidence reading. An exercise that straddles a
-// window boundary may appear twice — an acceptable, rare imperfection.
 function mergeExtractions(
   sessionId: string,
   partials: ExtractionOutput[]
@@ -238,6 +249,200 @@ function mergeExtractions(
     energyLevel: bestSourced(partials.map((p) => p.energyLevel)),
     openQuestions: uniqueStrings(partials.flatMap((p) => p.openQuestions ?? [])),
   };
+}
+
+function boundaryTranscript(
+  segments: WindowSegment[],
+  boundarySeconds: number
+): string {
+  const before = segments.filter(
+    (segment) =>
+      segment.startSeconds >= boundarySeconds - BOUNDARY_RECONCILIATION_SECONDS &&
+      segment.startSeconds < boundarySeconds
+  );
+  const after = segments.filter(
+    (segment) =>
+      segment.startSeconds >= boundarySeconds &&
+      segment.startSeconds < boundarySeconds + BOUNDARY_RECONCILIATION_SECONDS
+  );
+  return [
+    `THREE-MINUTE CONTEXT BEFORE BOUNDARY\n${windowTranscript(before)}`,
+    `THREE-MINUTE CONTEXT AFTER BOUNDARY\n${windowTranscript(after)}`,
+  ].join("\n\n");
+}
+
+function edgeExercise(
+  extraction: ExtractionOutput,
+  side: "left" | "right"
+): ExerciseRecord | undefined {
+  const exercises = [...(extraction.exercises ?? [])].sort(
+    (left, right) =>
+      (left.startedAtSeconds ?? 0) - (right.startedAtSeconds ?? 0)
+  );
+  return side === "left" ? exercises.at(-1) : exercises[0];
+}
+
+function isNearBoundary(
+  exercise: ExerciseRecord,
+  boundarySeconds: number,
+  side: "left" | "right"
+): boolean {
+  const edge =
+    side === "left"
+      ? exercise.endedAtSeconds ?? exercise.startedAtSeconds
+      : exercise.startedAtSeconds ?? exercise.endedAtSeconds;
+  return (
+    Number.isFinite(edge) &&
+    Math.abs((edge as number) - boundarySeconds) <=
+      BOUNDARY_RECONCILIATION_SECONDS
+  );
+}
+
+function parseJsonObject(text: string): Record<string, unknown> {
+  const jsonMatch =
+    text.match(/```(?:json)?\s*([\s\S]+?)\s*```/) ??
+    text.match(/(\{[\s\S]+\})/);
+  if (!jsonMatch) throw new Error("No JSON found in boundary response");
+  return JSON.parse(jsonMatch[1]) as Record<string, unknown>;
+}
+
+function isExerciseRecord(value: unknown): value is ExerciseRecord {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === "string" &&
+    typeof record.canonicalName === "string" &&
+    Array.isArray(record.sets) &&
+    Array.isArray(record.spokenNames) &&
+    Array.isArray(record.trainerNotes)
+  );
+}
+
+async function resolveBoundaryPair(
+  sessionId: string,
+  boundaryIndex: number,
+  boundarySeconds: number,
+  transcript: string,
+  left: ExerciseRecord,
+  right: ExerciseRecord
+): Promise<ExerciseRecord | null> {
+  const text = await generateText({
+    system: `You reconcile workout extraction only at a transcript processing boundary.
+
+Determine whether LEFT ENTRY and RIGHT ENTRY describe the same continuing exercise. Use only the supplied transcript evidence.
+
+If they are different exercises, return sameExercise false and resolvedExercise null.
+If they are the same exercise:
+- Return one resolved exercise containing every distinct completed set exactly once.
+- A set that starts before the boundary and finishes after it must appear once, using the completed total supported by the later evidence.
+- Never add the earlier partial count as a separate set.
+- Preserve genuinely separate sets on either side of the boundary.
+- Preserve supported cues and notes, but do not add general exercise knowledge.
+
+Return JSON only.`,
+    maxOutputTokens: 4096,
+    jsonSchema: BOUNDARY_RECONCILIATION_JSON_SCHEMA,
+    schemaName: "boundary_reconciliation",
+    maxQueueWaitMs: 180_000,
+    prompt: `Session: ${sessionId}
+Boundary ${boundaryIndex} at ${boundarySeconds} seconds.
+
+BOUNDARY TRANSCRIPT:
+${transcript}
+
+LEFT ENTRY:
+${JSON.stringify(left)}
+
+RIGHT ENTRY:
+${JSON.stringify(right)}
+
+Return JSON:
+{
+  "sameExercise": true,
+  "reason": "brief evidence-based explanation",
+  "resolvedExercise": "one exercise object matching the exercises item in the extraction schema, or null"
+}
+
+EXTRACTION SCHEMA:
+${OUTPUT_SCHEMA}`,
+  });
+  const parsed = parseJsonObject(text);
+  if (parsed.sameExercise !== true) return null;
+  if (!isExerciseRecord(parsed.resolvedExercise)) {
+    throw new Error("Boundary response returned a malformed resolved exercise");
+  }
+  return parsed.resolvedExercise;
+}
+
+async function reconcileBoundaryExercises(
+  sessionId: string,
+  segments: WindowSegment[],
+  windows: WindowSegment[][],
+  partials: ExtractionOutput[]
+): Promise<ExerciseRecord[]> {
+  const entries = partials.flatMap((partial, windowIndex) =>
+    (partial.exercises ?? []).map((exercise, exerciseIndex) => ({
+      exercise: structuredClone(exercise),
+      keys: [`${windowIndex}:${exerciseIndex}`],
+    }))
+  );
+
+  for (let rightWindow = 1; rightWindow < windows.length; rightWindow += 1) {
+    const boundarySeconds = windows[rightWindow][0]?.startSeconds;
+    const leftOriginal = edgeExercise(partials[rightWindow - 1], "left");
+    const rightOriginal = edgeExercise(partials[rightWindow], "right");
+    if (
+      !Number.isFinite(boundarySeconds) ||
+      !leftOriginal ||
+      !rightOriginal ||
+      !isNearBoundary(leftOriginal, boundarySeconds, "left") ||
+      !isNearBoundary(rightOriginal, boundarySeconds, "right")
+    ) {
+      continue;
+    }
+
+    const leftIndex = partials[rightWindow - 1].exercises.indexOf(leftOriginal);
+    const rightIndex = partials[rightWindow].exercises.indexOf(rightOriginal);
+    const leftKey = `${rightWindow - 1}:${leftIndex}`;
+    const rightKey = `${rightWindow}:${rightIndex}`;
+    const leftEntry = entries.find((entry) => entry.keys.includes(leftKey));
+    const rightEntry = entries.find((entry) => entry.keys.includes(rightKey));
+    if (!leftEntry || !rightEntry || leftEntry === rightEntry) continue;
+
+    try {
+      const resolved = await resolveBoundaryPair(
+        sessionId,
+        rightWindow,
+        boundarySeconds,
+        boundaryTranscript(segments, boundarySeconds),
+        leftEntry.exercise,
+        rightEntry.exercise
+      );
+      if (!resolved) continue;
+      leftEntry.exercise = {
+        ...resolved,
+        id: leftEntry.exercise.id,
+      };
+      leftEntry.keys.push(...rightEntry.keys);
+      entries.splice(entries.indexOf(rightEntry), 1);
+    } catch (error) {
+      console.warn(
+        `Boundary reconciliation skipped for session ${sessionId} at ${boundarySeconds}s:`,
+        error
+      );
+    }
+  }
+
+  return entries
+    .map((entry) => entry.exercise)
+    .sort(
+      (left, right) =>
+        (left.startedAtSeconds ?? 0) - (right.startedAtSeconds ?? 0)
+    )
+    .map((exercise, index) => ({
+      ...exercise,
+      sequenceNumber: index + 1,
+    }));
 }
 
 export async function answerWorkoutQuestion(

@@ -16,7 +16,7 @@ Motion Memo existed before OpenAI Build Week as an early mobile and web workout-
 
 During Build Week, the project was meaningfully extended into the current product:
 
-- Refined structured workout extraction, preserved context across transcript windows, and added deterministic exercise-name matching.
+- Refined structured workout extraction, added boundary-aware set reconciliation across transcript windows, and added deterministic exercise-name matching.
 - Added editable review and finalization, including exercises, sets, reps, weights, and trainer cues.
 - Rebuilt Ask AI around finalized records, user-scoped SQL plus pgvector hybrid retrieval, and multi-round conversations.
 - Added credits, Stripe billing, RevenueCat integration scaffolding, body measurements, and private-beta invitation support.
