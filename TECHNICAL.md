@@ -137,6 +137,36 @@ The pipeline makes the following model/service calls:
 5. **Summary:** no additional LLM call. `generateSummaryText()` deterministically formats the merged structured extraction into the compact workout recap.
 6. **Review and indexing:** the initial extraction is stored as `review_required` but is not indexed for Ask AI. Finalization saves the user-reviewed exercises and batches the resulting overview, complete exercise-set, and next-plan chunks in one Voyage embeddings request. The finalized status update and chunk replacement commit in one Postgres transaction after embeddings are ready.
 
+### Approval-gated evaluation proposals
+
+Every successful extraction now writes an immutable `extraction_runs` row containing the generated output, workflow version, provider/model identifiers, and a SHA-256 transcript hash. The transcript itself remains in the existing authenticated session tables and is never copied into an evaluation proposal.
+
+When a user finalizes a recap, the server compares only fields editable in the review UI: exercise presence and names, set presence, reps, weights, and coaching cues. Confidence normalization and other non-editable metadata do not count as corrections. The generated and reviewed exercise arrays plus the structured diff are saved once in `session_reviews`; repeated finalization requests return the existing result instead of creating another review or embedding pass.
+
+If the review contains corrections, the same transaction creates one `evaluation_proposals` row. A durable `evaluation-proposals` Vercel Queue job gives a bounded evaluator the private transcript, generated record, reviewed record, and deterministic diff. The evaluator can return only fixed cause, category, confidence, and intervention enums; application code validates those values and deterministically converts them into a sanitized proposal. It does not accept free-form model recommendations. The resulting GitHub Issue contains only workflow version, likely-cause classification, correction categories, aggregate change counts, a predefined recommendation, and acceptance criteria. It excludes Clerk IDs, session IDs, transcript text, exercise and cue names, and corrected values. If GitHub delivery is not configured, the evaluated proposal remains in Postgres with `delivery_status = 'awaiting_configuration'` and can be requeued later through the protected admin delivery route.
+
+Applying the `approved-for-codex` label to a generated proposal Issue triggers `.github/workflows/implement-approved-evaluation.yml`. The workflow verifies the approver, checks out the default branch on an ephemeral GitHub-hosted runner, and runs the official Codex GitHub Action with workspace-only write access. Codex receives a fixed repository-owned policy plus the sanitized proposal. A separate job without the OpenAI credential applies the resulting patch, runs workspace typecheck, API lint and build, and mobile TypeScript validation, then opens a draft pull request. The workflow never merges or deploys the pull request.
+
+Setup:
+
+1. Run the database migration after deployment.
+2. Set `EVALUATION_GITHUB_REPOSITORY` to the repository that contains the approval workflow, such as `owner/repository`.
+3. Set `EVALUATION_GITHUB_TOKEN` in Vercel to a fine-grained token that can create Issues in that repository. Prefer a narrowly scoped GitHub App installation token for a multi-user or long-lived deployment.
+4. Create the `approved-for-codex` label in GitHub.
+5. Add `OPENAI_API_KEY` as a GitHub Actions repository secret.
+6. Optionally set the `CODEX_APPROVERS` GitHub Actions repository variable to a comma-separated allowlist. When unset, only the repository owner may approve a proposal.
+7. In GitHub Actions settings, allow workflows to create pull requests. Keep branch protection and required review enabled.
+
+To redeliver up to 50 proposals that are pending, failed, or waiting for configuration:
+
+```bash
+curl -X POST https://your-api.example/api/admin/evaluation-proposals/deliver \
+  -H 'Content-Type: application/json' \
+  -d '{"secret":"YOUR_ADMIN_SECRET"}'
+```
+
+This is an approval and implementation transport, not autonomous production self-modification. Prompt, schema, model, and code changes remain ordinary reviewed pull requests.
+
 The boundary-aware V1 enhancement was evaluated locally with Claude Sonnet 4.6 against the reviewed June 20 and June 28 reference sessions. Exercise-name F1 improved from 0.50 to 0.55 and from 0.81 to 0.96 respectively, primarily by removing duplicate boundary records without reducing recall. This is a small evaluation set, so further reviewed transcripts remain necessary before treating the measured improvement as universal.
 
 Model output is parsed as untrusted JSON. When Gemini is selected, extraction uses Gemini's native `application/json` structured-output mode with an explicit JSON Schema. The parser handles JSON inside or outside Markdown code fences, but runtime schema validation remains limited; malformed structures can still fail the pipeline. Provider schema enforcement is defense in depth rather than a replacement for application validation.
@@ -208,6 +238,7 @@ iOS purchases use StoreKit through RevenueCat, with the Clerk user ID as the Rev
 The base Postgres schema is in `apps/api/lib/schema.sql`. Core tables include:
 
 - `sessions`, `audio_segments`, and `transcript_segments`.
+- `extraction_runs`, `session_reviews`, and `evaluation_proposals` preserve versioned generated output, finalized corrections, and sanitized approval proposals.
 - `session_chunks` with pgvector embeddings.
 - `processing_jobs` for durable recap state and `language_model_provider_state` for provider leases and shared 429 cooldowns.
 - `credit_accounts`, `credit_reservations`, and `credit_transactions`.
@@ -322,6 +353,8 @@ The plaintext code is returned once in the response. Store and distribute it sec
 | `GROQ_MAX_AUDIO_BYTES` | Optional transcription file-size guard override. |
 | `EXERCISE_DATASET_URL` | Optional override for the pinned exercise reference dataset. |
 | `EXERCISE_MEDIA_BASE_URL` | Optional HTTPS base URL for separately licensed exercise thumbnails and GIFs. Keep unset unless the deployment has media usage rights. |
+| `EVALUATION_GITHUB_REPOSITORY` | Optional `owner/repository` target for sanitized evaluation proposal Issues. Must contain the approval workflow. |
+| `EVALUATION_GITHUB_TOKEN` | Optional server-only fine-grained GitHub token allowed to create Issues in the configured repository. |
 | `NEXT_PUBLIC_API_URL` | Public deployed API URL exposed to the web client where needed. |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk public browser key. |
 | `CLERK_SECRET_KEY` | Clerk server key. |

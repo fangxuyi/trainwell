@@ -86,6 +86,65 @@ export async function POST(req: NextRequest) {
   `;
 
   await sql`
+    CREATE TABLE IF NOT EXISTS extraction_runs (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      workflow_version TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      transcript_hash TEXT NOT NULL,
+      generated_output JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`
+    ALTER TABLE sessions ADD COLUMN IF NOT EXISTS latest_extraction_run_id TEXT
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS extraction_runs_session_created_idx
+      ON extraction_runs(session_id, created_at DESC)
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS session_reviews (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      extraction_run_id TEXT REFERENCES extraction_runs(id) ON DELETE SET NULL,
+      workflow_version TEXT NOT NULL,
+      generated_exercises JSONB NOT NULL,
+      reviewed_exercises JSONB NOT NULL,
+      review_diff JSONB NOT NULL,
+      correction_count INTEGER NOT NULL CHECK (correction_count >= 0),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS evaluation_proposals (
+      id TEXT PRIMARY KEY,
+      review_id TEXT NOT NULL UNIQUE REFERENCES session_reviews(id) ON DELETE CASCADE,
+      analysis JSONB,
+      proposal JSONB NOT NULL,
+      delivery_status TEXT NOT NULL DEFAULT 'pending',
+      delivery_error TEXT,
+      github_issue_number INTEGER,
+      github_issue_url TEXT,
+      delivered_at TIMESTAMPTZ,
+      evaluated_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`ALTER TABLE evaluation_proposals ADD COLUMN IF NOT EXISTS analysis JSONB`;
+  await sql`
+    ALTER TABLE evaluation_proposals ADD COLUMN IF NOT EXISTS evaluated_at TIMESTAMPTZ
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS evaluation_proposals_delivery_idx
+      ON evaluation_proposals(delivery_status, created_at)
+  `;
+
+  await sql`
     CREATE TABLE IF NOT EXISTS credit_accounts (
       user_id TEXT PRIMARY KEY,
       permanent_credits INTEGER NOT NULL DEFAULT 100 CHECK (permanent_credits >= 0),

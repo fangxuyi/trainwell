@@ -32,7 +32,48 @@ CREATE TABLE IF NOT EXISTS sessions (
   markdown_content TEXT,
   audio_retention_policy TEXT NOT NULL DEFAULT 'delete_after_review',
   extraction_version TEXT,
+  latest_extraction_run_id TEXT,
   summary_version TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS extraction_runs (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  workflow_version TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  transcript_hash TEXT NOT NULL,
+  generated_output JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS session_reviews (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  extraction_run_id TEXT REFERENCES extraction_runs(id) ON DELETE SET NULL,
+  workflow_version TEXT NOT NULL,
+  generated_exercises JSONB NOT NULL,
+  reviewed_exercises JSONB NOT NULL,
+  review_diff JSONB NOT NULL,
+  correction_count INTEGER NOT NULL CHECK (correction_count >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS evaluation_proposals (
+  id TEXT PRIMARY KEY,
+  review_id TEXT NOT NULL UNIQUE REFERENCES session_reviews(id) ON DELETE CASCADE,
+  analysis JSONB,
+  proposal JSONB NOT NULL,
+  delivery_status TEXT NOT NULL DEFAULT 'pending',
+  delivery_error TEXT,
+  github_issue_number INTEGER,
+  github_issue_url TEXT,
+  delivered_at TIMESTAMPTZ,
+  evaluated_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -176,6 +217,10 @@ CREATE TABLE IF NOT EXISTS body_measurements (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at DESC);
+CREATE INDEX IF NOT EXISTS extraction_runs_session_created_idx
+  ON extraction_runs(session_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS evaluation_proposals_delivery_idx
+  ON evaluation_proposals(delivery_status, created_at);
 CREATE INDEX IF NOT EXISTS session_chunks_session_id_idx ON session_chunks(session_id);
 CREATE INDEX IF NOT EXISTS session_chunks_embedding_idx
   ON session_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 10);

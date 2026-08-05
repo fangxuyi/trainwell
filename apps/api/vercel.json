@@ -10,6 +10,16 @@
           "initialDelaySeconds": 0
         }
       ]
+    },
+    "app/api/queues/evaluation-proposals/route.ts": {
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "evaluation-proposals",
+          "retryAfterSeconds": 30,
+          "initialDelaySeconds": 0
+        }
+      ]
     }
   }
 }

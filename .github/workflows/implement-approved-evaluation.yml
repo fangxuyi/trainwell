@@ -1,0 +1,234 @@
+name: Implement approved evaluation proposal
+
+on:
+  issues:
+    types: [labeled]
+
+concurrency:
+  group: evaluation-proposal-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  generate_patch:
+    if: github.event.label.name == 'approved-for-codex'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      has_patch: ${{ steps.patch.outputs.has_patch }}
+    steps:
+      - name: Authorize proposal and approver
+        uses: actions/github-script@v7
+        env:
+          CODEX_APPROVERS: ${{ vars.CODEX_APPROVERS }}
+        with:
+          script: |
+            const body = context.payload.issue.body || '';
+            if (!body.includes('<!-- motion-memo-evaluation-proposal:')) {
+              core.setFailed('Issue is not a Motion Memo evaluation proposal.');
+              return;
+            }
+
+            const configured = (process.env.CODEX_APPROVERS || '')
+              .split(',')
+              .map((value) => value.trim())
+              .filter(Boolean);
+            const allowed = configured.length > 0 ? configured : [context.repo.owner];
+            if (!allowed.includes(context.actor)) {
+              core.setFailed(`Actor ${context.actor} is not authorized to approve Codex work.`);
+            }
+
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install trusted base-branch dependencies
+        run: npm ci
+
+      - name: Build fixed implementation prompt
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const policy = fs.readFileSync(
+              '.github/codex/prompts/implement-evaluation-proposal.md',
+              'utf8'
+            );
+            const issue = context.payload.issue;
+            const proposal = [
+              '--- BEGIN HUMAN-APPROVED SANITIZED PROPOSAL ---',
+              `Issue: #${issue.number} ${issue.title}`,
+              issue.body || '',
+              '--- END HUMAN-APPROVED SANITIZED PROPOSAL ---',
+            ].join('\n\n');
+            fs.writeFileSync('.codex-approved-proposal.md', `${policy}\n${proposal}\n`);
+
+      - name: Run Codex in the checked-out repository
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: .codex-approved-proposal.md
+          codex-args: '["--ephemeral"]'
+          sandbox: workspace-write
+          safety-strategy: drop-sudo
+          output-file: /tmp/codex-final-message.md
+
+      - name: Remove transient prompt
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            if (fs.existsSync('.codex-approved-proposal.md')) {
+              fs.unlinkSync('.codex-approved-proposal.md');
+            }
+
+      - name: Capture patch
+        id: patch
+        shell: bash
+        run: |
+          git add -N .
+          git diff HEAD --binary > codex.patch
+          if [ -s codex.patch ]; then
+            echo "has_patch=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_patch=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload Codex analysis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-proposal-analysis
+          path: /tmp/codex-final-message.md
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload proposed patch
+        if: steps.patch.outputs.has_patch == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-proposal-patch
+          path: codex.patch
+          if-no-files-found: error
+          retention-days: 14
+
+  open_draft_pr:
+    needs: generate_patch
+    if: needs.generate_patch.outputs.has_patch == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: evaluation-proposal-patch
+
+      - name: Apply patch
+        run: git apply --index codex.patch
+
+      - name: Detect affected workspaces
+        id: changes
+        shell: bash
+        run: |
+          changed=$(git diff --cached --name-only)
+          if echo "$changed" | grep -Eq '^(apps/api/|packages/schemas/)'; then
+            echo "api=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "api=false" >> "$GITHUB_OUTPUT"
+          fi
+          if echo "$changed" | grep -Eq '^(apps/mobile/|packages/schemas/)'; then
+            echo "mobile=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "mobile=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate workspace types
+        run: npm run typecheck
+
+      - name: Validate API lint
+        if: steps.changes.outputs.api == 'true'
+        run: npm run lint --workspace=apps/api
+
+      - name: Validate API build
+        if: steps.changes.outputs.api == 'true'
+        run: npm run build --workspace=apps/api
+
+      - name: Validate mobile TypeScript
+        if: steps.changes.outputs.mobile == 'true'
+        working-directory: apps/mobile
+        run: npx tsc --noEmit
+
+      - name: Create branch and draft pull request
+        id: pull_request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          branch="codex/evaluation-${ISSUE_NUMBER}-${RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -m "Implement approved evaluation proposal #${ISSUE_NUMBER}"
+          git push origin "$branch"
+          pr_url=$(gh pr create \
+            --draft \
+            --base "${{ github.event.repository.default_branch }}" \
+            --head "$branch" \
+            --title "Implement approved evaluation proposal #${ISSUE_NUMBER}" \
+            --body "Implements #${ISSUE_NUMBER}. Generated by the approval-gated Codex workflow. The pull request is intentionally a draft and requires human review; it will not merge or deploy itself.")
+          echo "pr_url=$pr_url" >> "$GITHUB_OUTPUT"
+
+      - name: Link draft pull request from proposal
+        uses: actions/github-script@v7
+        env:
+          PR_URL: ${{ steps.pull_request.outputs.pr_url }}
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `Codex created a draft pull request for human review: ${process.env.PR_URL}`,
+            });
+
+  report_no_patch:
+    needs: generate_patch
+    if: needs.generate_patch.result == 'success' && needs.generate_patch.outputs.has_patch == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Report that no safe patch was produced
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: 'Codex completed the approved investigation but produced no repository patch. Review the workflow run output before deciding whether to add more evidence or close the proposal.',
+            });
