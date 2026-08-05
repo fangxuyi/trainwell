@@ -1,9 +1,14 @@
+import { createHash } from "crypto";
 import type { NeonQueryFunctionInTransaction } from "@neondatabase/serverless";
 import sql from "./db";
 import { chunkExtraction, chunkMarkdown, type SessionChunk } from "./chunks";
 import { generateSummaryText } from "./markdown";
 import type { ExtractionOutput } from "./types";
 import { embedTexts } from "./voyage";
+import {
+  buildReviewDiff,
+  buildSanitizedEvaluationProposal,
+} from "./evaluation";
 
 export interface SessionIndexRow extends Record<string, unknown> {
   id: string;
@@ -27,6 +32,11 @@ function arrayValue<T>(value: unknown): T[] {
   } catch {
     return [];
   }
+}
+
+function stableOpaqueId(prefix: string, sessionId: string): string {
+  const digest = createHash("sha256").update(`${prefix}:${sessionId}`).digest("hex");
+  return `${prefix}:${digest.slice(0, 32)}`;
 }
 
 function extractionFromSession(session: SessionIndexRow): ExtractionOutput {
@@ -119,7 +129,13 @@ export async function finalizeAndIndexSession(
   sessionId: string,
   userId: string,
   exercises: ExtractionOutput["exercises"]
-): Promise<{ id: string; remoteStatus: string; remoteVersion: number; chunks: number } | null> {
+): Promise<{
+  id: string;
+  remoteStatus: string;
+  remoteVersion: number;
+  chunks: number;
+  evaluationProposalId: string | null;
+} | null> {
   const rows = await sql`
     SELECT * FROM sessions
     WHERE id = ${sessionId} AND user_id = ${userId}
@@ -128,6 +144,43 @@ export async function finalizeAndIndexSession(
   if (rows.length === 0) return null;
 
   const current = rows[0] as SessionIndexRow;
+  if (current.remote_status === "finalized") {
+    const state = await sql`
+      SELECT
+        (SELECT COUNT(*)::int FROM session_chunks WHERE session_id = ${sessionId}) AS chunks,
+        (SELECT ep.id
+         FROM evaluation_proposals ep
+         JOIN session_reviews sr ON sr.id = ep.review_id
+         WHERE sr.session_id = ${sessionId}
+         LIMIT 1) AS proposal_id
+    `;
+    return {
+      id: sessionId,
+      remoteStatus: "finalized",
+      remoteVersion: Number(current.remote_version ?? 0),
+      chunks: Number(state[0]?.chunks ?? 0),
+      evaluationProposalId:
+        typeof state[0]?.proposal_id === "string" ? state[0].proposal_id : null,
+    };
+  }
+
+  const generatedExercises = arrayValue<ExtractionOutput["exercises"][number]>(
+    current.exercises
+  );
+  const reviewDiff = buildReviewDiff(generatedExercises, exercises);
+  const workflowVersion =
+    (current.extraction_version as string | undefined) ?? "legacy-unversioned";
+  const reviewId = stableOpaqueId("review", sessionId);
+  const evaluationProposalId = reviewDiff.changes.length > 0
+    ? stableOpaqueId("evaluation", sessionId)
+    : null;
+  const proposal = evaluationProposalId
+    ? buildSanitizedEvaluationProposal(reviewDiff, workflowVersion)
+    : null;
+  const extractionRunId =
+    typeof current.latest_extraction_run_id === "string"
+      ? current.latest_extraction_run_id
+      : null;
   const finalized: SessionIndexRow = {
     ...current,
     exercises,
@@ -136,19 +189,46 @@ export async function finalizeAndIndexSession(
   const extraction = extractionFromSession(finalized);
   const summaryText = generateSummaryText(finalized, extraction);
   const chunks = await prepareChunks(finalized);
-  const results = await sql.transaction((transaction) => [
-    transaction`
-      UPDATE sessions
-      SET exercises = ${JSON.stringify(exercises)}::jsonb,
-          markdown_content = ${summaryText},
-          remote_status = 'finalized',
-          remote_version = COALESCE(remote_version, 0) + 1,
-          updated_at = now()
-      WHERE id = ${sessionId} AND user_id = ${userId}
-      RETURNING id, remote_status, remote_version
-    `,
-    ...replacementQueries(transaction, sessionId, chunks),
-  ]);
+  const results = await sql.transaction((transaction) => {
+    const queries = [
+      transaction`
+        UPDATE sessions
+        SET exercises = ${JSON.stringify(exercises)}::jsonb,
+            markdown_content = ${summaryText},
+            remote_status = 'finalized',
+            remote_version = COALESCE(remote_version, 0) + 1,
+            updated_at = now()
+        WHERE id = ${sessionId} AND user_id = ${userId}
+          AND remote_status <> 'finalized'
+        RETURNING id, remote_status, remote_version
+      `,
+      transaction`
+        INSERT INTO session_reviews (
+          id, session_id, user_id, extraction_run_id, workflow_version,
+          generated_exercises, reviewed_exercises, review_diff, correction_count
+        ) VALUES (
+          ${reviewId}, ${sessionId}, ${userId}, ${extractionRunId}, ${workflowVersion},
+          ${JSON.stringify(generatedExercises)}::jsonb,
+          ${JSON.stringify(exercises)}::jsonb,
+          ${JSON.stringify(reviewDiff)}::jsonb,
+          ${reviewDiff.changes.length}
+        )
+        ON CONFLICT (session_id) DO NOTHING
+      `,
+      ...(evaluationProposalId && proposal
+        ? [transaction`
+            INSERT INTO evaluation_proposals (
+              id, review_id, proposal, delivery_status
+            ) VALUES (
+              ${evaluationProposalId}, ${reviewId}, ${JSON.stringify(proposal)}::jsonb, 'pending'
+            )
+            ON CONFLICT (review_id) DO NOTHING
+          `]
+        : []),
+      ...replacementQueries(transaction, sessionId, chunks),
+    ];
+    return queries;
+  });
   const updated = results[0][0];
   if (!updated) return null;
 
@@ -157,5 +237,6 @@ export async function finalizeAndIndexSession(
     remoteStatus: updated.remote_status as string,
     remoteVersion: updated.remote_version as number,
     chunks: chunks.length,
+    evaluationProposalId,
   };
 }

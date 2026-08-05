@@ -1,8 +1,10 @@
+import { createHash, randomUUID } from "crypto";
 import sql from "./db";
 import { extractWorkoutDataWindowed } from "./extract";
 import { generateSummaryText } from "./markdown";
 import { canonicalizeExtraction, preloadExerciseDataset } from "./exercise-dataset";
 import { updateProcessingProgress } from "./processing-queue";
+import { getLanguageModelRuntimeMetadata } from "./language-model";
 
 const STAGE_MESSAGES: Record<string, string> = {
   load_transcript: "Loading your transcript.",
@@ -102,6 +104,7 @@ export async function transcribeAndExtract(sessionId: string): Promise<void> {
   if (sessionRows.length === 0) throw new Error(`Session ${sessionId} not found`);
   const session = sessionRows[0] as {
     id: string;
+    user_id: string;
     started_at: string;
     ended_at?: string;
     duration_seconds?: number;
@@ -115,25 +118,53 @@ export async function transcribeAndExtract(sessionId: string): Promise<void> {
     generateSummaryText(session, extraction)
   );
 
+  const extractionRunId = randomUUID();
+  const model = getLanguageModelRuntimeMetadata();
+  const transcriptHash = createHash("sha256")
+    .update(
+      JSON.stringify(
+        transcriptRows.map((row) => ({
+          startSeconds: row.start_seconds,
+          text: row.text,
+        }))
+      )
+    )
+    .digest("hex");
+
   // Persist extraction results
-  await timedStage(sessionId, "persist_recap", () => sql`
-      UPDATE sessions SET
-        exercises = ${JSON.stringify(extraction.exercises)}::jsonb,
-        session_notes = ${JSON.stringify(extraction.sessionNotes)},
-        technique_themes = ${JSON.stringify(extraction.techniqueThemes)},
-        accomplishments = ${JSON.stringify(extraction.accomplishments)},
-        improvement_areas = ${JSON.stringify(extraction.improvementAreas)},
-        pain_observations = ${JSON.stringify(extraction.painObservations)},
-        next_session_plan = ${JSON.stringify(extraction.nextSessionPlan ?? null)},
-        overall_difficulty = ${extraction.overallDifficulty?.value ?? null},
-        energy_level = ${extraction.energyLevel?.value ?? null},
-        markdown_content = ${summaryText},
-        extraction_version = ${extraction.extractionVersion},
-        remote_status = 'review_required',
-        remote_version = remote_version + 1,
-        updated_at = now()
-      WHERE id = ${sessionId}
-    `);
+  await timedStage(sessionId, "persist_recap", () =>
+    sql.transaction((transaction) => [
+      transaction`
+        INSERT INTO extraction_runs (
+          id, session_id, user_id, workflow_version, provider, model,
+          transcript_hash, generated_output
+        ) VALUES (
+          ${extractionRunId}, ${sessionId}, ${session.user_id},
+          ${extraction.extractionVersion}, ${model.provider}, ${model.model},
+          ${transcriptHash}, ${JSON.stringify(extraction)}::jsonb
+        )
+      `,
+      transaction`
+        UPDATE sessions SET
+          exercises = ${JSON.stringify(extraction.exercises)}::jsonb,
+          session_notes = ${JSON.stringify(extraction.sessionNotes)},
+          technique_themes = ${JSON.stringify(extraction.techniqueThemes)},
+          accomplishments = ${JSON.stringify(extraction.accomplishments)},
+          improvement_areas = ${JSON.stringify(extraction.improvementAreas)},
+          pain_observations = ${JSON.stringify(extraction.painObservations)},
+          next_session_plan = ${JSON.stringify(extraction.nextSessionPlan ?? null)},
+          overall_difficulty = ${extraction.overallDifficulty?.value ?? null},
+          energy_level = ${extraction.energyLevel?.value ?? null},
+          markdown_content = ${summaryText},
+          extraction_version = ${extraction.extractionVersion},
+          latest_extraction_run_id = ${extractionRunId},
+          remote_status = 'review_required',
+          remote_version = remote_version + 1,
+          updated_at = now()
+        WHERE id = ${sessionId}
+      `,
+    ])
+  );
 
   console.info(
     `[pipeline] session=${sessionId} status=completed duration_ms=${Date.now() - pipelineStartedAt}`

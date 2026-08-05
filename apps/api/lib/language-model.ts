@@ -47,6 +47,20 @@ function getProvider(): LanguageModelProvider {
   );
 }
 
+export function getLanguageModelRuntimeMetadata(): {
+  provider: LanguageModelProvider;
+  model: string;
+} {
+  const provider = getProvider();
+  if (provider === "openai") {
+    return { provider, model: process.env.OPENAI_MODEL ?? "gpt-5.6-terra" };
+  }
+  if (provider === "gemini") {
+    return { provider, model: process.env.GEMINI_MODEL ?? "gemini-3.5-flash" };
+  }
+  return { provider, model: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6" };
+}
+
 const sleep = (milliseconds: number) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 
