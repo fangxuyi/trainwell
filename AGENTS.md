@@ -36,6 +36,13 @@ Run the checks relevant to changed code:
 
 There is currently no repository-owned automated test suite.
 
+## Production Deployment
+
+- Keep the Vercel production branch set to `main` with `apps/api` as the project root.
+- Unless the user explicitly requests a feature-branch production release, deploy production only from the exact current `origin/main` commit. Do not run a production deployment from a feature branch or from uncommitted tracked changes.
+- Prefer the Vercel Git integration after a pull request is merged to `main`. If a manual production deployment is required, fetch `origin/main`, verify the deployment snapshot matches it, and deploy that clean snapshot.
+- Report the deployed Git commit and Vercel deployment ID after every production deployment.
+
 ## Definition of Done
 
 - The local-first workflow and authentication boundaries remain intact.
