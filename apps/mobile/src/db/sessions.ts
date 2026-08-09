@@ -262,7 +262,7 @@ export async function getUnsyncedSessions(): Promise<WorkoutSession[]> {
   const rows = await db.getAllAsync<Record<string, unknown>>(
     `SELECT * FROM sessions
      WHERE user_id = ?
-       AND local_status IN ('syncing', 'locally_complete', 'awaiting_upload')
+       AND local_status IN ('syncing', 'locally_complete', 'awaiting_upload', 'local_error')
        AND sync_status != 'synchronized'
        AND processing_mode != 'local_only'
      ORDER BY started_at DESC

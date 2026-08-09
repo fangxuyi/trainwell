@@ -23,6 +23,11 @@ import {
   processInterruptedRecording,
   retrySessionSync,
 } from "../../src/sync/recovery";
+import { getLatestFailedJobBySession } from "../../src/db/syncJobs";
+import {
+  parseSyncIssue,
+  type SessionSyncIssue,
+} from "../../src/sync/errors";
 import { HeaderAction, ScreenHeader } from "../../src/ui/ScreenHeader";
 import { sessionStatusPresentation } from "../../src/ui/sessionPresentation";
 import { colors, radii } from "../../src/ui/theme";
@@ -38,24 +43,29 @@ export default function SessionDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [noteCount, setNoteCount] = useState(0);
   const [recovering, setRecovering] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [syncIssue, setSyncIssue] = useState<SessionSyncIssue | null>(null);
   const [previewExerciseId, setPreviewExerciseId] = useState<string | null>(null);
   const [processingStatus, setProcessingStatus] = useState<ProcessingStatusResponse | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadAll = useCallback(async () => {
-    const [currentSession, notes] = await Promise.all([
+    const [currentSession, notes, failedJob] = await Promise.all([
       getSessionById(id),
       getNotesBySession(id),
+      getLatestFailedJobBySession(id),
     ]);
     setSession(currentSession);
     setNoteCount(notes.length);
+    setSyncIssue(parseSyncIssue(failedJob?.lastError));
     setLoading(false);
 
     apiGet<Record<string, unknown>>(`/api/workouts/${id}`)
       .then((remote) => upsertSessionsFromServer([remote]))
-      .then(() => getSessionById(id))
-      .then((refreshed) => {
+      .then(() => Promise.all([getSessionById(id), getLatestFailedJobBySession(id)]))
+      .then(([refreshed, latestFailedJob]) => {
         if (refreshed) setSession(refreshed);
+        setSyncIssue(parseSyncIssue(latestFailedJob?.lastError));
       })
       .catch(() => {});
 
@@ -67,14 +77,16 @@ export default function SessionDetailScreen() {
       loadAll().then((currentSession) => {
         if (currentSession && SYNCING_STATUSES.has(currentSession.localStatus)) {
           pollRef.current = setInterval(async () => {
-            const [refreshed, remoteProcessingStatus] = await Promise.all([
+            const [refreshed, remoteProcessingStatus, latestFailedJob] = await Promise.all([
               getSessionById(id),
               apiGet<ProcessingStatusResponse>(`/api/workouts/${id}/processing-status`).catch(
                 () => null
               ),
+              getLatestFailedJobBySession(id),
             ]);
             if (!refreshed) return;
             setSession(refreshed);
+            setSyncIssue(parseSyncIssue(latestFailedJob?.lastError));
             if (remoteProcessingStatus) setProcessingStatus(remoteProcessingStatus);
             if (!SYNCING_STATUSES.has(refreshed.localStatus)) {
               clearInterval(pollRef.current!);
@@ -117,6 +129,19 @@ export default function SessionDetailScreen() {
     );
   };
 
+  const handleRetrySync = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      await retrySessionSync(id);
+      await loadAll();
+    } catch (error) {
+      Alert.alert("Retry failed", (error as Error).message);
+    } finally {
+      setRetrying(false);
+    }
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={[styles.safeArea, styles.center]}>
@@ -138,6 +163,9 @@ export default function SessionDetailScreen() {
 
   const status = sessionStatusPresentation(session);
   const isSyncing = SYNCING_STATUSES.has(session.localStatus);
+  const isFinalizing = session.remoteStatus === "review_required" && session.syncStatus === "pending";
+  const issueTitle = syncIssueTitle(syncIssue);
+  const issueMessage = syncIssueMessage(syncIssue);
   const date = new Date(session.startedAt);
 
   return (
@@ -204,9 +232,13 @@ export default function SessionDetailScreen() {
           <View style={styles.syncingCard}>
             <ActivityIndicator color={colors.warning} size="small" />
             <View style={styles.noticeCopy}>
-              <Text style={styles.syncingTitle}>Building your recap</Text>
+              <Text style={styles.syncingTitle}>
+                {isFinalizing ? "Saving your review" : "Building your recap"}
+              </Text>
               <Text style={styles.syncingText}>
-                {processingStatus?.processingMessage ??
+                {isFinalizing
+                  ? "Your corrections are saved on this phone and will retry automatically."
+                  : processingStatus?.processingMessage ??
                   (session.localStatus === "syncing"
                     ? "Uploading and processing your session."
                     : "Preparing your recording for sync.")}
@@ -349,7 +381,9 @@ export default function SessionDetailScreen() {
           </View>
         )}
 
-        {session.remoteStatus === "review_required" && session.syncStatus !== "pending" && (
+        {session.remoteStatus === "review_required" &&
+          session.syncStatus !== "pending" &&
+          session.localStatus !== "local_error" && (
           <TouchableOpacity
             style={styles.reviewButton}
             onPress={() => router.push(`/review/${id}`)}
@@ -367,28 +401,24 @@ export default function SessionDetailScreen() {
         {session.localStatus === "local_error" && (
           <View style={styles.errorCard}>
             <Text style={styles.noticeEyebrow}>SYNC NEEDS ATTENTION</Text>
-            <Text style={styles.errorTitle}>Your session is safe on this phone.</Text>
-            <Text style={styles.errorCardText}>
-              Try the upload again, or add credits if your balance is empty.
-            </Text>
+            <Text style={styles.errorTitle}>{issueTitle}</Text>
+            <Text style={styles.errorCardText}>{issueMessage}</Text>
             <View style={styles.errorActions}>
               <TouchableOpacity
-                style={styles.errorAction}
-                onPress={async () => {
-                  try {
-                    await retrySessionSync(id);
-                  } catch (error) {
-                    Alert.alert("Retry failed", (error as Error).message);
-                  } finally {
-                    await loadAll();
-                  }
-                }}
+                style={[styles.errorAction, retrying && styles.buttonDisabled]}
+                disabled={retrying}
+                onPress={handleRetrySync}
               >
-                <Text style={styles.errorActionText}>Retry sync</Text>
+                {retrying ? <ActivityIndicator color={colors.danger} size="small" /> : null}
+                <Text style={styles.errorActionText}>
+                  {retrying ? "Starting…" : "Retry sync"}
+                </Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.errorAction} onPress={() => router.push("/credits")}>
-                <Text style={styles.errorActionText}>Get credits</Text>
-              </TouchableOpacity>
+              {syncIssue?.code === "insufficient_credits" && (
+                <TouchableOpacity style={styles.errorAction} onPress={() => router.push("/credits")}>
+                  <Text style={styles.errorActionText}>Get credits</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         )}
@@ -443,6 +473,38 @@ function ListItem({ text }: { text: string }) {
       <Text style={styles.listText}>{text}</Text>
     </View>
   );
+}
+
+function syncIssueTitle(issue: SessionSyncIssue | null): string {
+  switch (issue?.code) {
+    case "insufficient_credits":
+      return "Add credits to continue.";
+    case "authentication":
+      return "Sign in again to sync.";
+    case "network":
+      return "The connection was interrupted.";
+    case "upload":
+      return "The recording still needs to upload.";
+    case "finalization":
+      return "Your review is saved on this phone.";
+    case "processing":
+      return "The recap could not finish processing.";
+    default:
+      return "Your session is safe on this phone.";
+  }
+}
+
+function syncIssueMessage(issue: SessionSyncIssue | null): string {
+  if (issue?.code === "insufficient_credits") {
+    const details = [
+      issue.requiredCredits != null ? `${issue.requiredCredits} required` : null,
+      issue.creditBalance != null ? `${issue.creditBalance} available` : null,
+    ].filter(Boolean);
+    return details.length > 0
+      ? `${issue.message} ${details.join(" · ")}.`
+      : issue.message;
+  }
+  return issue?.message ?? "Try the sync again. Motion Memo will preserve the local session until it succeeds.";
 }
 
 const styles = StyleSheet.create({
@@ -529,7 +591,7 @@ const styles = StyleSheet.create({
   errorTitle: { color: colors.text, fontSize: 17, fontWeight: "900", marginTop: 8 },
   errorCardText: { color: colors.textMuted, fontSize: 11, lineHeight: 17, marginTop: 6 },
   errorActions: { flexDirection: "row", gap: 9, marginTop: 14 },
-  errorAction: { flex: 1, borderRadius: radii.medium, backgroundColor: "rgba(255, 125, 125, 0.12)", padding: 12, alignItems: "center" },
+  errorAction: { flex: 1, minHeight: 48, borderRadius: radii.medium, backgroundColor: "rgba(255, 125, 125, 0.12)", padding: 12, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 7 },
   errorActionText: { color: colors.danger, fontSize: 11, fontWeight: "900" },
   deleteButton: { borderRadius: radii.medium, borderWidth: 1, borderColor: "rgba(255, 125, 125, 0.16)", padding: 14, alignItems: "center", marginTop: 7 },
   deleteButtonText: { color: colors.danger, fontSize: 11, fontWeight: "800" },
