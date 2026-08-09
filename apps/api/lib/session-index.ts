@@ -167,16 +167,29 @@ export async function finalizeAndIndexSession(
   const generatedExercises = arrayValue<ExtractionOutput["exercises"][number]>(
     current.exercises
   );
-  const reviewDiff = buildReviewDiff(generatedExercises, exercises);
   const workflowVersion =
     (current.extraction_version as string | undefined) ?? "legacy-unversioned";
   const reviewId = stableOpaqueId("review", sessionId);
-  const evaluationProposalId = reviewDiff.changes.length > 0
-    ? stableOpaqueId("evaluation", sessionId)
-    : null;
-  const proposal = evaluationProposalId
-    ? buildSanitizedEvaluationProposal(reviewDiff, workflowVersion)
-    : null;
+  let reviewDiff: ReturnType<typeof buildReviewDiff> | null = null;
+  let evaluationProposalId: string | null = null;
+  let proposal: ReturnType<typeof buildSanitizedEvaluationProposal> | null = null;
+  try {
+    reviewDiff = buildReviewDiff(generatedExercises, exercises);
+    evaluationProposalId = reviewDiff.changes.length > 0
+      ? stableOpaqueId("evaluation", sessionId)
+      : null;
+    proposal = evaluationProposalId
+      ? buildSanitizedEvaluationProposal(reviewDiff, workflowVersion)
+      : null;
+  } catch (error) {
+    // Review-diff capture improves future extraction quality, but it is not part
+    // of the user's finalization contract. Malformed historical model output
+    // must never prevent reviewed corrections from being finalized.
+    console.warn(
+      `Skipping evaluation capture for session ${sessionId}; finalization will continue`,
+      error
+    );
+  }
   const extractionRunId =
     typeof current.latest_extraction_run_id === "string"
       ? current.latest_extraction_run_id
@@ -202,19 +215,21 @@ export async function finalizeAndIndexSession(
           AND remote_status <> 'finalized'
         RETURNING id, remote_status, remote_version
       `,
-      transaction`
-        INSERT INTO session_reviews (
-          id, session_id, user_id, extraction_run_id, workflow_version,
-          generated_exercises, reviewed_exercises, review_diff, correction_count
-        ) VALUES (
-          ${reviewId}, ${sessionId}, ${userId}, ${extractionRunId}, ${workflowVersion},
-          ${JSON.stringify(generatedExercises)}::jsonb,
-          ${JSON.stringify(exercises)}::jsonb,
-          ${JSON.stringify(reviewDiff)}::jsonb,
-          ${reviewDiff.changes.length}
-        )
-        ON CONFLICT (session_id) DO NOTHING
-      `,
+      ...(reviewDiff
+        ? [transaction`
+            INSERT INTO session_reviews (
+              id, session_id, user_id, extraction_run_id, workflow_version,
+              generated_exercises, reviewed_exercises, review_diff, correction_count
+            ) VALUES (
+              ${reviewId}, ${sessionId}, ${userId}, ${extractionRunId}, ${workflowVersion},
+              ${JSON.stringify(generatedExercises)}::jsonb,
+              ${JSON.stringify(exercises)}::jsonb,
+              ${JSON.stringify(reviewDiff)}::jsonb,
+              ${reviewDiff.changes.length}
+            )
+            ON CONFLICT (session_id) DO NOTHING
+          `]
+        : []),
       ...(evaluationProposalId && proposal
         ? [transaction`
             INSERT INTO evaluation_proposals (

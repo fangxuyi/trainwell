@@ -125,7 +125,18 @@ const EVALUATION_ANALYSIS_SCHEMA: Record<string, unknown> = {
 };
 
 function cueTexts(exercise: ExerciseRecord): string[] {
-  return (exercise.techniqueNotes ?? []).map((note) => note.text.trim());
+  if (!Array.isArray(exercise.techniqueNotes)) return [];
+
+  return exercise.techniqueNotes.flatMap((note) => {
+    const text = typeof note?.text === "string" ? note.text.trim() : "";
+    return text ? [text] : [];
+  });
+}
+
+function comparableExerciseName(exercise: ExerciseRecord): string {
+  return typeof exercise.canonicalName === "string"
+    ? exercise.canonicalName.trim()
+    : "";
 }
 
 function comparableWeight(set: ExerciseRecord["sets"][number]): { value: number; unit: string } | null {
@@ -159,7 +170,7 @@ export function buildReviewDiff(
       continue;
     }
 
-    if (generated.canonicalName.trim() !== reviewed.canonicalName.trim()) {
+    if (comparableExerciseName(generated) !== comparableExerciseName(reviewed)) {
       addChange(changes, {
         kind: "exercise_renamed",
         exerciseId: generated.id,
