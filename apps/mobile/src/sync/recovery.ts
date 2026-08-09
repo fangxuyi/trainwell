@@ -60,7 +60,13 @@ export function runSyncRecovery(): Promise<void> {
 
 export async function retrySessionSync(sessionId: string): Promise<void> {
   await resetSessionJobsForRetry(sessionId);
-  await runSyncWorker(sessionId);
+  await updateSessionStatus(sessionId, {
+    localStatus: "syncing",
+    syncStatus: "pending",
+  });
+  void runSyncWorker(sessionId).catch((error) =>
+    console.error("[SyncRecovery] Manual retry failed", sessionId, error)
+  );
 }
 
 export async function processInterruptedRecording(sessionId: string): Promise<void> {

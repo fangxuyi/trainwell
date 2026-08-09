@@ -22,8 +22,7 @@ import {
   getSessionById,
   saveExerciseEdits,
 } from "../../src/db/sessions";
-import { enqueueJob } from "../../src/db/syncJobs";
-import { deleteLocalAudio } from "../../src/storage/audioFiles";
+import { ensureSessionJobForUserAction } from "../../src/db/syncJobs";
 import { runSyncWorker } from "../../src/sync/worker";
 import { ScreenHeader } from "../../src/ui/ScreenHeader";
 import { colors, radii } from "../../src/ui/theme";
@@ -295,13 +294,10 @@ export default function ReviewScreen() {
             setSaving(true);
             try {
               await saveExerciseEdits(id, finalizedExercises);
-              await enqueueJob(id, "finalize_remote_session");
+              await ensureSessionJobForUserAction(id, "finalize_remote_session");
               await finalizeSession(id);
-              if (session?.audioRetentionPolicy === "delete_after_review") {
-                await deleteLocalAudio(id);
-              }
               void runSyncWorker(id);
-              returnToSession();
+              router.replace(`/session/${id}`);
             } catch (error) {
               Alert.alert("Could not finalize session", (error as Error).message);
             } finally {

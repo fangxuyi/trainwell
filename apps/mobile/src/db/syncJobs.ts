@@ -60,6 +60,45 @@ export async function ensureJob(
     : enqueueJob(sessionId, type, payloadReference);
 }
 
+// User-triggered actions should have one live job. Reuse and reset the newest
+// unfinished job, and retire duplicates left by older app versions.
+export async function ensureSessionJobForUserAction(
+  sessionId: string,
+  type: SyncJobType,
+  payloadReference?: string
+): Promise<SyncJob> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<Record<string, unknown>>(
+    `SELECT * FROM sync_jobs
+     WHERE session_id = ? AND type = ?
+       AND COALESCE(payload_reference, '') = COALESCE(?, '')
+       AND status != 'completed'
+     ORDER BY created_at DESC`,
+    [sessionId, type, payloadReference ?? null]
+  );
+  if (rows.length === 0) return enqueueJob(sessionId, type, payloadReference);
+
+  const selected = rowToJob(rows[0]);
+  const ts = now();
+  await db.runAsync(
+    `UPDATE sync_jobs
+     SET status = 'pending', attempt_count = 0, next_attempt_at = ?,
+         last_error = NULL, updated_at = ?
+     WHERE id = ?`,
+    [ts, ts, selected.id]
+  );
+  await db.runAsync(
+    `UPDATE sync_jobs
+     SET status = 'completed', last_error = 'Superseded by a newer user action',
+         next_attempt_at = NULL, updated_at = ?
+     WHERE session_id = ? AND type = ? AND id != ?
+       AND COALESCE(payload_reference, '') = COALESCE(?, '')
+       AND status != 'completed'`,
+    [ts, sessionId, type, selected.id, payloadReference ?? null]
+  );
+  return (await getJobById(selected.id)) as SyncJob;
+}
+
 export async function getJobById(id: string): Promise<SyncJob | null> {
   const db = await getDb();
   const row = await db.getFirstAsync<Record<string, unknown>>(
@@ -87,6 +126,49 @@ export async function getDueJobs(limit = 10): Promise<SyncJob[]> {
   return rows.map(rowToJob);
 }
 
+export async function getRunnableJobsBySession(sessionId: string): Promise<SyncJob[]> {
+  const db = await getDb();
+  const ts = now();
+  const rows = await db.getAllAsync<Record<string, unknown>>(
+    `SELECT * FROM sync_jobs
+     WHERE session_id = ?
+       AND (
+         status = 'pending'
+         OR (status = 'retry_wait' AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
+       )
+     ORDER BY created_at ASC`,
+    [sessionId, ts]
+  );
+  return rows.map(rowToJob);
+}
+
+export async function hasUncompletedSessionJob(
+  sessionId: string,
+  type: SyncJobType
+): Promise<boolean> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM sync_jobs
+     WHERE session_id = ? AND type = ? AND status != 'completed'`,
+    [sessionId, type]
+  );
+  return Number(row?.count ?? 0) > 0;
+}
+
+export async function getLatestFailedJobBySession(
+  sessionId: string
+): Promise<SyncJob | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<Record<string, unknown>>(
+    `SELECT * FROM sync_jobs
+     WHERE session_id = ? AND last_error IS NOT NULL
+       AND status IN ('blocked', 'failed_permanently', 'retry_wait')
+     ORDER BY updated_at DESC LIMIT 1`,
+    [sessionId]
+  );
+  return row ? rowToJob(row) : null;
+}
+
 export async function markJobRunning(id: string): Promise<void> {
   const db = await getDb();
   const ts = now();
@@ -103,8 +185,24 @@ export async function markJobCompleted(id: string): Promise<void> {
   const db = await getDb();
   const ts = now();
   await db.runAsync(
-    `UPDATE sync_jobs SET status = 'completed', updated_at = ? WHERE id = ?`,
+    `UPDATE sync_jobs
+     SET status = 'completed', last_error = NULL, next_attempt_at = NULL, updated_at = ?
+     WHERE id = ?`,
     [ts, id]
+  );
+}
+
+export async function completeSessionJobsByType(
+  sessionId: string,
+  type: SyncJobType
+): Promise<void> {
+  const db = await getDb();
+  const ts = now();
+  await db.runAsync(
+    `UPDATE sync_jobs
+     SET status = 'completed', last_error = NULL, next_attempt_at = NULL, updated_at = ?
+     WHERE session_id = ? AND type = ? AND status != 'completed'`,
+    [ts, sessionId, type]
   );
 }
 
@@ -138,6 +236,21 @@ export async function markJobFailed(
      SET status = ?, last_error = ?, next_attempt_at = ?, updated_at = ?
      WHERE id = ?`,
     [isPermanent ? "failed_permanently" : "retry_wait", error, nextAttempt, ts, id]
+  );
+}
+
+export async function markJobDeferred(
+  id: string,
+  nextAttemptAt: string,
+  message?: string
+): Promise<void> {
+  const db = await getDb();
+  const ts = now();
+  await db.runAsync(
+    `UPDATE sync_jobs
+     SET status = 'retry_wait', next_attempt_at = ?, last_error = ?, updated_at = ?
+     WHERE id = ?`,
+    [nextAttemptAt, message ?? null, ts, id]
   );
 }
 
